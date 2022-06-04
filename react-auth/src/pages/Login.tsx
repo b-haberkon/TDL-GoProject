@@ -1,6 +1,6 @@
 import React, { SyntheticEvent, useState } from 'react';
 import { Link, Navigate } from 'react-router-dom';
-import "../Css/Login.css";
+import "../css/Login.css";
 
 
 const Login = (props: { setName: (name: string) => void }) => {
