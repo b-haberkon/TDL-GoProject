@@ -80,7 +80,7 @@ func (player *Player) NewGame(games *Games, config GameConfig, extra any) RetWit
 				game.Kill("Can't join creator")
 			}
 		}
-		resp <- intent
+		resp.SendAndClose( intent )
 	})
 }
 
