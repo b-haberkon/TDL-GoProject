@@ -58,7 +58,7 @@ func (player *Player) IsValid() chan bool {
 	return resp
 }
 
-/** @brief Crea un juego si no está en ninguno, pero no se une. **/
+/** @brief Crea un juego si no está en ninguno, y se une. **/
 /** \todo Debería tener referencia a Players, que tiene a Games **/
 func (player *Player) NewGame(games *Games, config GameConfig, extra any) RetWithError[*Game] {
 	resp := NewRetWithError[*Game]()
