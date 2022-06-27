@@ -10,3 +10,26 @@ func removeNils[T any](els ...any) []T {
 	return ret
 }
 
+func limitate[T int | uint | uint8 | ~string ](ptr *T, min T, max T) {
+	if( (*ptr) < min) {
+		(*ptr) = min
+	} else
+	if( (*ptr) > max) {
+		(*ptr) = max
+	}
+}
+
+func min[T int](a,b int) int {
+	if(a<b) {
+		return a
+	}
+	return b
+}
+
+func max[T int](a,b int) int {
+	if(a>b) {
+		return a
+	}
+	return b
+}
+

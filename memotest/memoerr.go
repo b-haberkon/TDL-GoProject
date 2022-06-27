@@ -61,17 +61,21 @@ func (resp RetWithError[T])SendNewAndClose(ret T, err error) RetWithError[T] {
 }
 
 
+/** @brief Recibe un canal resp RetWithError[SStr] (que recibe un stream o un error),
+ * y devuelve un canal de strings con una respuesta en Json (la recibida o el error).
+ * Lee una única vez el canal resp, si es un error, envía por la salida el error en
+ * un strig con un JSON; si no, copia los mismos fragmentos recibidos.
+ */
 func ErrToJson(resp RetWithError[SStr]) chan string {
 	out := make(chan string)
 	go func() {
-		var recv 	SStr
 		intent := <- resp
 		if(intent.err != nil) {
 			intent.val = showRetError(intent.err)
 		} 
-		// Si no era ok, intent.val es nil, que es lo buscado
-		if(recv != nil) {
-			for chunk := range recv {
+		// En este punto, intent.val es el stream recibido, o el generado para el error.
+		if(intent.val != nil) {
+			for chunk := range intent.val {
 				out <- chunk
 			}
 		} // if

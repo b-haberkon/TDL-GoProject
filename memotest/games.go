@@ -2,7 +2,7 @@ package memotest
 
 import(
 	"errors"
-	//"fmt"
+	//"fmt"			// imprimir info de debug
 )
 
 type Games	struct {
@@ -37,8 +37,21 @@ func (games *Games) NewGame(config GameConfig, extra any) RetWithError[*Game] {
 		games.Ids.inc()
 		id := games.Ids
 		go func() { // Ya no necesita bloquear games
-			resp.SendNewAndClose( NewGame(id, config, extra), nil)
+			game := NewGame(id, config, extra)
+			/** Llamo a una función que bloqueará hasta que games procesa la petición
+			 *  De agregar el juego al map (los maps no son seguros entre goroutines).
+			 *  Como ya hay un canal para enviar la respuesta, simplemente usa el mismo
+			 *  enviándoselo a la goroutine interna de SetGame.
+			 **/
+			games.SetGame(id, game, resp)
 		} ()
+	})
+}
+
+func (games *Games) SetGame (id GameId, game *Game, resp RetWithError[*Game]) RetWithError[*Game] {
+	resp.SendNewAndClose(game , nil)
+	return GamesAsync( games, resp, func(loop *Loop) {
+		games.All[id] = game
 	})
 }
 

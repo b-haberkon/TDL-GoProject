@@ -45,36 +45,6 @@ type Game struct {
 	Status  GameStatus
 }
 
-func limitate[T int | uint | uint8 | ~string ](ptr *T, min T, max T) {
-	if( (*ptr) < min) {
-		(*ptr) = min
-	} else
-	if( (*ptr) > max) {
-		(*ptr) = max
-	}
-}
-func min[T int](a,b int) int {
-	if(a<b) {
-		return a
-	}
-	return b
-}
-
-func max[T int](a,b int) int {
-	if(a>b) {
-		return a
-	}
-	return b
-}
-
-func shuffleSymbols(org []*Symbol, amount int) []*Symbol {
-	/** \todo Agrupar de a pares y otras cosas. **/
-	dest := make([]*Symbol, amount)
-	l := len(org)
-	copy(dest, org[0:min(amount,l)])
-	return dest
-}
-
 func NewGame(id GameId, config GameConfig, extra any) *Game {
 	game 		:= 	Game{
 		Loop	:	nil,
@@ -111,6 +81,22 @@ func NewGame(id GameId, config GameConfig, extra any) *Game {
 	return &game
 }
 
+/** @brief Ejecuta la función fn en el bucle del juego (si no es null),
+ * o en una goroutine que devuelve un error (si es null).
+ * \todo Refactorizar con similares, usando interfaces. **/
+func GameAsync[T any](game *Game,resp RetWithError[T], fn LoopFn) RetWithError[T] {
+	if (game == nil) {
+		go func() {
+			ret := WithError[T]{}
+			ret.err = errors.New("Null game")
+			resp.SendAndClose( ret )
+		} ()
+	} else {
+		game.Loop.Async(fn)
+	}
+	return resp
+}
+
 func (game *Game) GetId() RetWithError[GameId] {
 	resp := NewRetWithError[GameId]()
 	go func() {
@@ -126,7 +112,7 @@ func (game *Game) GetId() RetWithError[GameId] {
 func (game *Game) IsValid() chan bool {
 	resp := make(chan bool)
 	go func() {
-		resp <- (game == nil)
+		resp <- (game != nil)
 		close(resp)
 	} ()
 	return resp
@@ -134,13 +120,11 @@ func (game *Game) IsValid() chan bool {
 
 func (game *Game) Join(player *Player) RetWithError[*Game] {
 	resp := NewRetWithError[*Game]()
-	if(game == nil) {
-		return resp.SendNewAndClose(nil, errors.New("Invalid game") )
-	}
-	if(player == nil) {
-		return resp.SendNewAndClose(nil, errors.New("Invalid player") )
-	}
-	game.Loop.Async(func(loop *Loop){
+	GameAsync(game, resp, func(loop *Loop) {
+		if(player == nil) {
+			resp.SendNewAndClose(nil, errors.New("Invalid player") )
+			return
+		}
 		/** \todo game.IsValid() player.IsValdi() **/
 		/** \todo game not end **/
 		var amount uint8 = uint8( len(game.Players) )
@@ -151,15 +135,17 @@ func (game *Game) Join(player *Player) RetWithError[*Game] {
 			return
 		}
 
+		game.Players = append(game.Players, player)
+		resp.SendNewAndClose(game, nil)
+		fmt.Printf("Game %v join player %v\n",game.Id,player.Id)
+		/** \todo Notificar jugadores incluyendo nombre de nuevo jugador **/
+
+		// Si estaba esperando llega al mínimo, y justo llega, empezar.
 		if(game.Config.PMin == amount + 1) && (Waiting == game.Status) {
 			/** \todo Notificar, etc.*/
 			game.Status = Playing
 		}
 
-		game.Players = append(game.Players, player)
-		resp.SendNewAndClose(game, nil)
-		fmt.Printf("Game %v join player %v\n",game.Id,player.Id)
-		/** \todo Notificar jugadores incluyendo nombre de nuevo jugador **/
 	})
 	return resp
 }
@@ -182,6 +168,7 @@ func (cfg *GameConfig) Show() chan string {
 	return stream
 }
 
+
 func (game *Game) Show() chan string {
 	stream := make(chan string)
 	if(game == nil) {
@@ -192,7 +179,7 @@ func (game *Game) Show() chan string {
 	} else {
 		game.Loop.Async(func(loop *Loop){
 			status := game.Status
-			players := make([]*Player, 0, len(game.Players))
+			players := make([]*Player, len(game.Players)) // Extranañamente, debe haber n elementos para que copy funcione
 			copy(players, game.Players)
 
 			// Para el resto no necesita bloquear game

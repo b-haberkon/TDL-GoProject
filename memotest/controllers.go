@@ -1,7 +1,7 @@
 package memotest
 
 import (
-    "encoding/json"
+    //"encoding/json" // Era usando para enviar JSON, ahora se hace por partes con stream
     "fmt"
 	"math/rand"
 	"strconv"
@@ -17,13 +17,29 @@ var playersList	*	Players
 var gamesList	*	Games
 var rng 		*	rand.Rand
 
-func CtrlStart() {
-	rng			= 	rand.New(rand.NewSource(time.Now().UnixNano()))
-    store		=	session.New()
-	gamesList 	=	NewGames(nil)
-	playersList	=	NewPlayers(gamesList,nil)
-}
+var ej1 []*Symbol = []*Symbol {
+    {Text: "A", Pair: 0}, {Text: "a", Pair: 0},
+    {Text: "B", Pair: 1}, {Text: "b", Pair: 1},
+    {Text: "C", Pair: 2}, {Text: "c", Pair: 2},
+    {Text: "D", Pair: 3}, {Text: "d", Pair: 3},
+    {Text: "E", Pair: 4}, {Text: "e", Pair: 4},
+    {Text: "F", Pair: 5}, {Text: "f", Pair: 5},
+    {Text: "G", Pair: 6}, {Text: "g", Pair: 6},
+    {Text: "H", Pair: 7}, {Text: "h", Pair: 7},
+    {Text: "I", Pair: 8}, {Text: "i", Pair: 8},
+    {Text: "J", Pair: 9}, {Text: "j", Pair: 9} }
 
+/******************************************************************************
+**** FUNCIONES AUXILIARES PARA LOS CONTROLADORES ******************************
+******************************************************************************/
+
+/** @brief Devuelve un canal en el que una gouroutine
+ * escribirá un true después del tiempo dado. Pero
+ * además es posible reiniciar el tiempo escribiendo
+ * en el segundo ganal.
+ * @param d Duración del tiempo de espera.
+ * \todo ¿Cambiar el canal de reset por un chan time.Duration?
+ **/
 func timeout(d time.Duration) (chan bool, chan bool) {
 	resp := make(chan bool)
 	rst  := make(chan bool)
@@ -31,24 +47,31 @@ func timeout(d time.Duration) (chan bool, chan bool) {
 		exit := false
 		for {
 			select {
-			case <- rst:
-				exit = false
-			default:
-				if(exit) {
-					resp<-true
-					close(resp)
-					return
-				} else {
-					time.Sleep(d)
-					exit = true
+			case <- rst:			// Mientras haya algo para leer en reset,
+				exit = false		// simplemente se asegura de que exit sea false.
+			default:				// Sólo si no hay un reset,
+				if(exit) {			// si no hubo un reset entre la última espera y esta iteración,
+					resp<-true		// envía que finalizó,
+					close(resp)		// cierra el canal,
+					return			// y finaliza.
+				} else {			// Si es inicial o viene de un reset,
+					time.Sleep(d)	// duerme el tiempo necesario (en el que puede llegar un reset),
+					exit = true		// y setea que en la próxima iteración (si no hubo un reset), finalice.
 				}	
 			} // select
 		} // for
 	} ()
 	return resp, rst
 }
+
+// Auxiliar para ctrlWrap, es el tipo de la función que será pasada,
+// escrita por separado para aumentar la legibilidad.
 type ctrlWrapped func(*fiber.Ctx,chan bool) (SStr, []error);
 
+/** @brief Envuelve a una función de controlador que devuelve la respuesta,
+ * de forma que si la envuelta no finaliza a tiempo, la envolvente responderá
+ * con un error. Además, si la respuesta incluye un error, lo convierte a JSON.
+ */
 func ctrlWrap(c *fiber.Ctx, ctrl ctrlWrapped ) error {
 	to,rst := timeout(10 * time.Second)
 	resp   := make(chan SStr)
@@ -103,36 +126,18 @@ func ctrlWrap(c *fiber.Ctx, ctrl ctrlWrapped ) error {
 	} */
 
 	/** \todo ¿También poner un timeout en el flat, ya que es lazy? **/
-	return c.SendStream( (<- chanStr).fork(NewSStrSpy("SEND",16)) ) // s.Flat()
+	return c.SendStream( (<- chanStr).fork(NewSStrSpy("SEND",16)).AsIO() ) // s.Flat()
 }
 
-func sendError(c *fiber.Ctx, ex error) error {
-    j, err := json.Marshal(ex.Error);
-    if(err != nil) {
-        return ex;
-    }
-	txt := fmt.Sprintf(`{"error":{"message":%v}}`, string(j))
-	fmt.Println(txt)
-    return c.SendString(txt)
-}
-
-var ej1 []*Symbol = []*Symbol {
-    {Text: "A", Pair: 0}, {Text: "a", Pair: 0},
-    {Text: "B", Pair: 1}, {Text: "b", Pair: 1},
-    {Text: "C", Pair: 2}, {Text: "c", Pair: 2},
-    {Text: "D", Pair: 3}, {Text: "d", Pair: 3},
-    {Text: "E", Pair: 4}, {Text: "e", Pair: 4},
-    {Text: "F", Pair: 5}, {Text: "f", Pair: 5},
-    {Text: "G", Pair: 6}, {Text: "g", Pair: 6},
-    {Text: "H", Pair: 7}, {Text: "h", Pair: 7},
-    {Text: "I", Pair: 8}, {Text: "i", Pair: 8},
-    {Text: "J", Pair: 9}, {Text: "j", Pair: 9} }
-
+// Auxiliar para getPlayerAndId
 type PlayerWithId struct{
 	Ptr *Player
 	Id  PlayerId
 }
 
+/** Devuelve el objeto jugador y su id asociado a la sesión, o un error.
+ * @param c Contexto de la petición HTTP, de donde busca la información de sesión.
+ **/
 func getPlayerAndId(c *fiber.Ctx) RetWithError[PlayerWithId] {
 	ret  := WithError[PlayerWithId]{}
 	resp := NewRetWithError[PlayerWithId]()
@@ -173,6 +178,49 @@ func getPlayerAndId(c *fiber.Ctx) RetWithError[PlayerWithId] {
 	return resp
 }
 
+// Auxuliar para getGameAndId
+type GameWithId struct{
+	Ptr *Game
+	Id  GameId
+}
+
+/** Devuelve el objeto juego y su id asociado a la petición, o un error.
+ * @param c Contexto de la petición HTTP, de donde busca la ruta de la petición.
+ **/
+func getGameAndId(c *fiber.Ctx) (resp RetWithError[GameWithId]) {
+	ret  := WithError[GameWithId]{}
+	resp =  NewRetWithError[GameWithId]()
+
+	go func() { // La que realmente trae los valores
+		defer func() { resp.SendAndClose(ret) } ()
+
+		num, err := strconv.Atoi(c.Params("gameId"))
+		if(err != nil) {
+			ret.err = err
+			return
+		}
+		ret.val.Id = GameId{num}
+
+		intent := <- gamesList.GetById(ret.val.Id)
+		ret.err = intent.err
+		ret.val.Ptr = intent.val
+	} () // Fin: La que realmente trae los valores
+	return resp
+}
+
+/******************************************************************************
+**** FUNCIONES PÚBLICAS (CONTROLADORES HTTP) **********************************
+******************************************************************************/
+
+/** Inicializa lo necesario para el minijuego Memotest. **/
+func CtrlStart() {
+	rng			= 	rand.New(rand.NewSource(time.Now().UnixNano()))
+    store		=	session.New()
+	gamesList 	=	NewGames(nil)
+	playersList	=	NewPlayers(gamesList,nil)
+}
+
+/** @brief Intenta crear un juego. **/
 func CreateGame(c *fiber.Ctx) error {
 	return ctrlWrap(c, func(c *fiber.Ctx, rstTo chan bool) (SStr, []error) {
 		playerInfo := <- getPlayerAndId(c)
@@ -202,32 +250,8 @@ func CreateGame(c *fiber.Ctx) error {
 	}) // Función interna y llamada
 } // Función externa
 
-type GameWithId struct{
-	Ptr *Game
-	Id  GameId
-}
 
-func getGameAndId(c *fiber.Ctx) (resp RetWithError[GameWithId]) {
-	ret  := WithError[GameWithId]{}
-	resp =  NewRetWithError[GameWithId]()
-
-	go func() { // La que realmente trae los valores
-		defer func() { resp.SendAndClose(ret) } ()
-
-		num, err := strconv.Atoi(c.Params("gameId"))
-		if(err != nil) {
-			ret.err = err
-			return
-		}
-		ret.val.Id = GameId{num}
-
-		intent := <- gamesList.GetById(ret.val.Id)
-		ret.err = intent.err
-		ret.val.Ptr = intent.val
-	} () // Fin: La que realmente trae los valores
-	return resp
-}
-
+/** @brief Intenta unirse a un juego. **/
 func JoinGame(c *fiber.Ctx) error {
 	return ctrlWrap(c, func(c *fiber.Ctx, rstTo chan bool) (SStr, []error) {
 		// Lanzo las dos subrutinas
@@ -255,6 +279,7 @@ func JoinGame(c *fiber.Ctx) error {
 	}) // Función interna y llamada
 } // Función externa
 
+/** Intenta mostrar un juego. **/
 func ShowGame(c *fiber.Ctx) error {
 	return ctrlWrap(c, func(c *fiber.Ctx, rstTo chan bool) (SStr, []error) {
 		// Lanzo las dos subrutinas
@@ -265,12 +290,14 @@ func ShowGame(c *fiber.Ctx) error {
 		infoGame   := <- chanGame
 		errs := removeNils[error](infoPlayer.err, infoGame.err)
 		if(len(errs)>0) {
+			fmt.Printf("DEBUG: ShowGame: %v\n",errs)
 			return nil, errs
 		}
 		fmt.Printf("Player %v: watch game %v…\n",
 			infoPlayer.val.Id, infoGame.val.Id.str() )
-		
-		return infoGame.val.Ptr.Show(), nil
+		game := infoGame.val.Ptr
+		data := game.Show()
+		return data, nil
 	}) // Función interna y llamada
 } // Función externa
 

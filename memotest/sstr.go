@@ -67,17 +67,6 @@ func (o SStr)AsyncFlat() SStr {
 	})
 }
 
-func (s SStr) Read(p []byte) (n int, err error) {
-	select {
-	case chunk, ok := <- s:
-		if(ok) {
-			return copy(p, []byte(chunk)), nil
-		} else {
-			return 0, io.EOF
-		}
-	}
-}
-
 func (o SStr) spy(name string) SStr {
 	return NewSStr( func(d SStr) bool {
 		for chunk := range o {
@@ -115,3 +104,40 @@ func NewSStrSpy(name string, num int) chan string {
 	} ()
 	return fstr
 }
+
+// Compatible con io.Stream()
+type SStrIO struct {
+	stream SStr			// Stram del que está leyendo
+	extra  *string		// Adicional sin enviar (resto de una lectura anterior)
+}
+
+func (s SStr) AsIO() *SStrIO {
+	return &SStrIO{s, nil}
+}
+
+func (S *SStrIO) helper(p []byte, pchunk *string) (n int, err error) {
+	n = copy(p, []byte(*pchunk))
+	if (n < len(*pchunk)) {
+		out := (*pchunk)[n:]
+		S.extra = &out
+	} else {
+		S.extra = nil
+	}
+	return n, nil
+}
+
+func (S *SStrIO) Read(p []byte) (n int, err error) {
+	if(S.extra != nil) {					// Si había quedado algo
+		return S.helper(p, S.extra)			// Leo, pero de lo que quedó
+	}
+
+	select {
+	case chunk, ok := <- S.stream:
+		if(ok) {
+			return S.helper(p, &chunk)		// Leo lo recibido
+		} else {
+			return 0, io.EOF				// Fin de stream
+		}
+	}	// select
+}
+
