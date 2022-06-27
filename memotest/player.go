@@ -74,7 +74,7 @@ func (player *Player) NewGame(games *Games, config GameConfig, extra any) RetWit
 		// Si está en un juego, no puede crear uno.
 		if (player.Playing != nil) {
 			previous := <- player.Playing.GetId()
-			txt := fmt.Sprintf(`Already playing %v`, previous )
+			txt := fmt.Sprintf(`Already playing %v`, previous.val.str() )
 			resp.SendNewAndClose( nil, errors.New(txt) )
 			return
 		}
@@ -98,7 +98,7 @@ func (player *Player) JoinGame(game *Game) RetWithError[*Game] {
 		// Si está en un juego, no puede unirse a uno
 		if (player.Playing != nil) {
 			previous := <- player.Playing.GetId()
-			txt := fmt.Sprintf(`Already playing %v`, previous )
+			txt := fmt.Sprintf(`Already playing %v`, previous.val.str() )
 			resp.SendNewAndClose( nil, errors.New(txt) )
 			return
 		}
