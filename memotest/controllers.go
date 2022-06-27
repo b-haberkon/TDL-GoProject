@@ -71,9 +71,11 @@ type ctrlWrapped func(*fiber.Ctx,chan bool) (SStr, []error);
 /** @brief Envuelve a una función de controlador que devuelve la respuesta,
  * de forma que si la envuelta no finaliza a tiempo, la envolvente responderá
  * con un error. Además, si la respuesta incluye un error, lo convierte a JSON.
+ * \todo Como la conexión HTTP puede cerrar por timeout, llamar a ciertos
+ * métodos lleva a pánico; debería tambier ignorarlos.
  */
 func ctrlWrap(c *fiber.Ctx, ctrl ctrlWrapped ) error {
-	to,rst := timeout(10 * time.Second)
+	to,rst := timeout(60 * time.Second)
 	resp   := make(chan SStr)
 	go func() { 
 		str, errs := ctrl(c,rst)					// Llama al controlador
@@ -85,6 +87,7 @@ func ctrlWrap(c *fiber.Ctx, ctrl ctrlWrapped ) error {
 	}()
 
 	chanStr := make(chan SStr)
+	httpCode := 200
 	go func() {
 		done := false
 		closed := 0
@@ -97,14 +100,16 @@ func ctrlWrap(c *fiber.Ctx, ctrl ctrlWrapped ) error {
 				} else
 				if !done {
 					done = true
+					httpCode = 504
 					chanStr <- SStr1(`{"error":{"message":"timeout"}}`)
 				}
 			case recv, ok := <- resp:
 				if( ok) {
 					if done {
-						fmt.Printf("Out of time answer discarded")
+						fmt.Printf("Out of time answer discarded\n")
 					} else {
 						done = true
+						httpCode = 200
 						chanStr <- recv
 					} // done
 				} else { // !ok
@@ -126,7 +131,7 @@ func ctrlWrap(c *fiber.Ctx, ctrl ctrlWrapped ) error {
 	} */
 
 	/** \todo ¿También poner un timeout en el flat, ya que es lazy? **/
-	return c.SendStream( (<- chanStr).fork(NewSStrSpy("SEND",16)).AsIO() ) // s.Flat()
+	return c.Status(httpCode).SendStream( (<- chanStr).fork(NewSStrSpy("SEND",16)).AsIO() )
 }
 
 // Auxiliar para getPlayerAndId
@@ -152,10 +157,24 @@ func getPlayerAndId(c *fiber.Ctx) RetWithError[PlayerWithId] {
 			return
 		}
 
-		player, ok := (sess.Get("player")).(*Player)	// Trae el valor en la sesión
-		ok = ok && ( <- player.IsValid() )				// Debe ser válido
-		if(!ok) { // Si no había valor, obtiene uno nuevo
-			name := "" /** \todo Obtener o generar anónimoNNN */
+		//player, ok := (sess.Get("player")).(*Player)	// Trae el valor en la sesión
+		var player *Player = nil
+		var playerId PlayerId
+		var err error
+		plStr, ok := (sess.Get("playerId")).(string)	// Trae el valor como string desde la sesión
+		if(ok) {
+			playerId, err = PlayerIdFromStr(plStr)		// Convierte el string en PlayerId
+			ok = (nil==err)
+		}
+		if(ok) {
+			intent := <- playersList.GetById(playerId)	// Obtiene el jugador por Id
+			if(intent.err == nil) {
+				player = intent.val
+			}
+		}
+		if(player == nil) { // Si no había valor, obtiene uno nuevo
+			name := "" // Si es vacío, generará uno con el número.
+			/** \todo ¿Obtener nombre de sesión? */
 			intent := <- playersList.NewPlayer(name, nil)
 			if(intent.err != nil) {
 				ret.err = intent.err
@@ -163,17 +182,21 @@ func getPlayerAndId(c *fiber.Ctx) RetWithError[PlayerWithId] {
 				return
 			}
 			player = intent.val
+
+			// Acá ya tengo el player nuevo, busco el Id
+			idIntent := <- player.GetId()
+			if(idIntent.err != nil) {
+				ret.err = idIntent.err
+				return
+			}
+			playerId = idIntent.val
 		}
 
-		// Acá ya tengo el player (viejo o nuevo)
-		idIntent := <- player.GetId()
-		if(idIntent.err != nil) {
-			ret.err = idIntent.err
-			return
-		}
-		ret.val.Id  = idIntent.val
+		ret.val.Id  = playerId
 		ret.val.Ptr = player
-		sess.Set("player",player)
+		sess.Set("playerId",playerId.str())
+		sess.Save()
+		fmt.Printf("Sesión %v, jugador %v.\n",sess.ID(),playerId.str())
 		} () // Fin: La que realmente trae los valores
 	return resp
 }

@@ -110,12 +110,7 @@ func (game *Game) GetId() RetWithError[GameId] {
 }
 
 func (game *Game) IsValid() chan bool {
-	resp := make(chan bool)
-	go func() {
-		resp <- (game != nil)
-		close(resp)
-	} ()
-	return resp
+	return AsyncVal(game != nil)
 }
 
 func (game *Game) Join(player *Player) RetWithError[*Game] {

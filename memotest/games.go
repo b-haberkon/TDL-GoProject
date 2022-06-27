@@ -36,7 +36,7 @@ func (games *Games) NewGame(config GameConfig, extra any) RetWithError[*Game] {
 	return GamesAsync( games, resp, func(loop *Loop) {
 		games.Ids.inc()
 		id := games.Ids
-		go func() { // Ya no necesita bloquear games
+		go func() { // Por ahora desbloquea games
 			game := NewGame(id, config, extra)
 			/** Llamo a una función que bloqueará hasta que games procesa la petición
 			 *  De agregar el juego al map (los maps no son seguros entre goroutines).

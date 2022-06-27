@@ -46,7 +46,7 @@ func NewPiece(id PieceId, row uint8, col uint8, symbol *Symbol) *Piece {
 	if(symbol == nil) {
 		symbol = &emptySymbol;
 	}
-    piece       :=  &Piece{nil, id, row, col, *symbol, Hidden, 0}
+    piece       :=  &Piece{nil, id, row, col, *symbol, Hidden, PlayerId{0}}
     piece.Loop  =   NewLoop(piece)
     return          piece
 }

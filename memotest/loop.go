@@ -54,3 +54,12 @@ func LoopAwaitInto[T any](loop *Loop, fn LoopFn, resp chan T) T {
 func LoopAwait[T any](loop *Loop, fn LoopFn) T {
 	return LoopAwaitInto[T](loop, fn, make(chan T))
 }
+
+func AsyncVal[T any](val T) chan T {
+	resp := make(chan T)
+	go func() {
+		resp <- val
+		close(resp)
+	} ()
+	return resp
+}

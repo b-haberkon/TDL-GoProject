@@ -7,7 +7,14 @@ import (
 	"strconv"
 )
 
-type PlayerId 	uint
+type PlayerId struct { val int }
+
+func (id PlayerId) str() string { return strconv.Itoa(id.val) }
+func (id* PlayerId) inc() { (*id).val++ }
+func PlayerIdFromStr(s string) (PlayerId, error) {
+	val, err := strconv.Atoi(s)
+	return PlayerId{val}, err
+}
 
 type Player 	struct {
 	Loop		*Loop
@@ -18,6 +25,9 @@ type Player 	struct {
 }
 
 func NewPlayer(id PlayerId, name string, extra any) *Player {
+	if(0==len(name)) {
+		name = "Anon"+id.str()
+	}
 	player 		:= 	Player{nil, id, name, extra, nil}
 	player.Loop =	NewLoop(&player)
 	return 			&player
@@ -44,7 +54,7 @@ func (player *Player) GetId() RetWithError[PlayerId] {
 	// el canal, y se daría un bloqueo.
 	go func() {
 		if(player == nil) {
-			resp.SendNewAndClose( 0, errors.New("Null player") )
+			resp.SendNewAndClose( PlayerId{0}, errors.New("Null player") )
 		} else {
 			resp.SendNewAndClose( player.Id, nil )
 		}
@@ -53,9 +63,7 @@ func (player *Player) GetId() RetWithError[PlayerId] {
 }
 
 func (player *Player) IsValid() chan bool {
-	resp := make(chan bool)
-	resp <- (player == nil)
-	return resp
+	return AsyncVal(player != nil)
 }
 
 /** @brief Crea un juego si no está en ninguno, y se une. **/
@@ -109,7 +117,7 @@ func (player *Player) Show() chan string {
 		name, err := json.Marshal(player.Name)
 		go func() { // Fuera de bucle player
 			stream <- `{"gameId":null`
-			stream <- `,"playerId":` + strconv.Itoa(int(plId))
+			stream <- `,"playerId":` + plId.str()
 			stream <- `,"name":`
 			
 			if( err == nil) {
