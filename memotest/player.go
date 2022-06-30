@@ -22,13 +22,15 @@ type Player 	struct {
 	Name		string
 	Extra 		any
 	Playing		*Game
+	Selected	*Piece
+	Owned		[]*Piece
 }
 
 func NewPlayer(id PlayerId, name string, extra any) *Player {
 	if(0==len(name)) {
 		name = "Anon"+id.str()
 	}
-	player 		:= 	Player{nil, id, name, extra, nil}
+	player 		:= 	Player{nil, id, name, extra, nil, nil, make([]*Piece, 2)}
 	player.Loop =	NewLoop(&player)
 	return 			&player
 }
@@ -130,4 +132,46 @@ func (player *Player) Show() chan string {
 		} () // Fin: Fuera de bucle player
 		resp.SendNewAndClose(stream,nil)
 	}) )
+}
+
+func (player *Player) selectPiece(gameId GameId,pieceId PieceId) RetWithError[*MoveResult] {
+	resp := NewRetWithError[*MoveResult]()
+	return PlayerAsync( player, resp, func(loop *Loop) {
+		// Ver que el gameId coincida
+		myGame := <- player.Playing.GetId()
+		if (myGame.err != nil) || (myGame.val != gameId) {
+			msg := fmt.Sprintf("You are playing %v, not %v", myGame.val.str(), gameId.str())
+			resp.SendNewAndClose(nil,errors.New(msg))
+			return
+		}
+		// Obtener pieza
+		pieceIntent := <- player.Playing.getPiece(pieceId)
+		if(pieceIntent.err != nil) {
+			resp.SendNewAndClose(nil,pieceIntent.err)
+			return
+		}
+		/** \todo La pieza podría devolver un resultado, según si estaba ocupada,
+		 * no existe, etc., y devolver eso al usuario. **/
+		/** \todo El jugador podría tener un estado para no elegir muchas piezas rápidamente;
+		 * además, mientras espera una respuesta podría devolver el error de "seleccionando".
+		 **/
+		piece := pieceIntent.val;
+		if(player.Selected == nil) {							// Es la primera que selecciono
+			selIntent := <- piece.Select(player, player.Id)		// Intento seleccionarla (mientras, el jugador queda bloqueado)
+			if(selIntent.err != nil) {
+				resp.SendNewAndClose(nil,selIntent.err)
+				return
+			}
+			player.Selected = piece;
+		} else {
+			pairIntent := <- piece.Pair(player, player.Id, player.Selected)
+			if(pairIntent.err != nil) {
+				resp.SendNewAndClose(nil,pairIntent.err)
+				return
+			}
+			player.Owned = append(player.Owned, piece)
+			player.Owned = append(player.Owned, player.Selected)
+			player.Selected = nil
+		}
+	})
 }

@@ -1,0 +1,273 @@
+<!doctype HTML>
+<head>
+    <meta charset="utf-8">
+    <style>
+.board {
+    display:flex;
+    flex-direction:column;
+    flex-wrap: wrap;
+    width: 90%;
+}
+.memoRow {
+    display:flex;
+    flex-direction:row;
+    flex-grow:1;
+    flex-wrap: wrap;
+    flex: 5em;
+}
+.piece {
+    border: 2px outset #888;
+    flex: 5em;
+    flex-grow:1;
+    margin: 0.5em;
+}
+    </style>
+    <script>
+const APIURL = '//localhost:8000/api/';
+class HtmlWrap {
+    constructor(id,pairs) {
+        if(!(this.el = document.getElementById(id))) {
+            this.el = document.createElement('div');
+            this.el.id = id;
+        }
+        
+        for(const [elName,elData] of Object.entries(pairs)) {
+        const el = this[elName] = document.getElementById(elName);
+        for(const [evName,fnName] of Object.entries(elData)) {
+            var fn = this[fnName];
+            if(!fn) {
+                console.error('Method '+fnName+' unknown')
+                continue;
+            }
+            fn = this[fnName] = fn.bind(this);
+            el.addEventListener(evName,fn);
+        }
+    }
+    }
+    async showResponse(resp) {
+        const tit = 'Error HTTP '+resp.status + ': ' + resp.statusText;
+        const msg = response.body?tit + '\n\n' + response.json():tit;
+        console.error(resp);
+        alert(tit);
+    }
+    async showJsonError(data) {
+        console.error(data);
+        alert('Response has error:'+data?.message?('\n\n'+data.message):'');
+    }
+}
+
+class MemoGamePlayingStatus {
+
+}
+    const MemoGameStatusDict = {
+    "Playing" : MemoGamePlayingStatus,
+}
+class MemoGameStatus {
+    constructor(game, name) {
+        const cl = MemoGameStatusDict[name];
+        if(!cl) throw "Game status unexpected: "+name;
+        this.status = new cl(game);
+    }
+}
+
+class MemoPlayer {
+    constructor(game, data) {
+        this.playerId = data?.playerId;
+        this.name = data?.name;
+    }
+}
+
+class MemoPieceAbstractState {
+    constructor(game,piece,name) {
+        this.game  = game;
+        this.piece = piece;
+        this.name  = name;
+    }
+    async draw(el) {
+        const tx = document.createElement('div');
+        tx.className = 'pieceText'
+        tx.innerText = await this.piece.getText();
+        el.innerHTML = '';
+        el.className = 'piece piece'+this.name;
+        el.append(tx);
+        return el;
+    }
+    async click(ev) {
+        const resp = await fetch(APIURL+'memo/'+this.game.gameId+'/'+this.piece.getId(),{method:'PUT'});
+        if(!resp.ok)
+            throw 'HTTP Error '+resp.status;
+        const data = await resp.json();
+        if('piece' in data)
+            this.piece.update(data);
+        //if('error' in data)
+        throw data;
+    }
+}
+class MemoPieceHiddenState extends MemoPieceAbstractState {
+    constructor(game,piece,name) {
+        super(game,piece,name);
+    }
+}
+class MemoPieceSelectedState extends MemoPieceAbstractState {
+}
+class MemoPiecePairedState extends MemoPieceAbstractState {
+}
+class MemoPieceRemovedState extends MemoPieceAbstractState {
+    async click(ev) {
+        // No debe hacer nada.
+    }
+}
+const MemoPieceStates = {
+    'Hidden':   MemoPieceHiddenState,   // Estado inicial, la pieza no es visible.
+    'Selected': MemoPieceSelectedState, // La pieza fue seleccionada por un jugador (visible)
+    'Paired':   MemoPiecePairedState,   // La pieza fue emparejada con otra por un jugador
+    'Removed':  MemoPieceRemovedState,  // La pieza fue removida al ser emparejada
+}
+class MemoPieceState {
+    constructor(game,piece,name) {
+        const cl = MemoPieceStates[name];
+        if(!cl) throw "Piece state unexpected: "+name;
+        this.state = new cl(game,piece,name);
+        this.game = game;
+        this.piece = piece;
+        const direct = ['draw','click'];
+        direct.map(name=>this[name]=(...args)=>this.state[name](...args));
+    }
+}
+
+const MemoPieceDirectProps = ['Text','Id','Row','Col'];
+
+class MemoPiece extends HtmlWrap {
+    constructor(game, data) {
+        const elId = 'piece'+data.Id;
+        super(elId,{});
+        this.game = game;
+        this.setData(data);
+        MemoPieceDirectProps.map(name=>{
+            this['get'+name[0].toUpperCase()+name.substr(1)]=()=>this['_'+name];
+        });
+        // Métodos que pasan directamente al State:
+        const direct = ['click'];
+        direct.map(name=>this[name]=(...args)=>(this.state[name].bind(this.state))(...args));
+        // Eventos que llaman métodos:
+        const ofThis = ['click'];
+        ofThis.map( name => this.el.addEventListener(name,async (ev)=>{
+            try {
+                await this[name](ev);
+            } catch(ex) {
+                console.error(ex);
+                alert(ex);
+            }
+        }));
+    }
+    async draw() {
+        return await this.state.draw(this.el);
+    }
+    async setData(data) {
+        this.state = new MemoPieceState(this.game,this,data.State);
+        MemoPieceDirectProps.map(name=>{
+            this['_'+name]=data[name];
+        });
+    }
+    async update(data) {
+        await this.setData(data);
+        await this.draw(this.el);
+    }
+}
+class MemoGame extends HtmlWrap {
+    constructor(data) {
+        super('board',{});
+        this.status = new MemoGameStatus(this,data.status);
+        this.gameId = Number(data.gameId);
+        this.config = data.config;
+        this.players = data.players
+            .map(data=>new MemoPlayer(this,data));
+        this.pieces = data.pieces
+            .map(data=>new MemoPiece(this,data))
+        this.piecesByPos=[...Array(this.config.Rows)]
+            .map(row=>[...Array(this.config.Cols)]);
+        this.piecesById=[];
+        for(const piece of this.pieces) {
+            this.piecesByPos[piece.getRow()][piece.getCol()] = piece;
+            this.piecesById[piece.getId()]=piece;
+        }
+    }
+    async draw() {
+        const el = this.el;
+        el.innerHTML = '';
+        for(let row=0; row<this.config.Rows; row++) {
+            const rowEl = document.createElement('div');
+            rowEl.id="row"+row;
+            rowEl.className='memoRow';
+            el.append(rowEl);
+            (async ()=> {
+                const pieces = this.piecesByPos[row];
+                if(pieces) for(let col=0; col<this.config.Cols; col++) {
+                    const piece = pieces[col];
+                    rowEl.append(await ( piece?piece.draw():this.empty()) );
+                }
+            })();
+        } // for
+        return el;
+    }
+    async empty() {
+        const el = document.createElement('el');
+        el.className = 'pieceRemoved'
+        return el;
+    }
+}
+class MemoMenu extends HtmlWrap {
+    constructor() {
+        super('menu', {
+            'btUnirse' : {
+                'click':'unirse'
+            },
+            'btNuevo'  : {
+                'click':'nuevo'},
+            'inGameId' : {
+                'keyup':'idKeyUp'
+            }
+        });
+    }
+    async unirse(ev) {
+        this.gameId = Number(this.inGameId.value);
+        this.inGameId.value = this.gameId;
+        const url = APIURL + 'memo/'+this.gameId;
+        return await this.startGame(url,{method: 'POST'});
+    }
+    async nuevo(ev) {
+        const url = APIURL+'memo';
+        return await this.startGame(url,{method: 'POST'});
+    }
+    async idKeyUp(ev) {
+        if(e.key === 'Enter' || e.keyCode === 13) {
+            return await this.unirse(ev);
+        }
+    }
+    async startGame(url,config) {
+        const resp = await fetch(url, config);
+        if(!resp.ok)
+            return await this.showResponse(resp);
+        const data = await resp.json();
+        if('error' in data)
+            return await this.showJsonError(data);
+        try {
+            console.log('game',data);
+            window.game = new MemoGame(data);
+            this.inGameId.value = window.game.gameId;
+            window.game.draw();
+        } catch(ex) {
+            console.error(ex);
+            alert('Error al unirse: '+ex);
+        }
+    }
+
+}
+window.addEventListener('load',_=>window.menu = new MemoMenu());
+
+    </script>
+</head>
+<body>
+    <div id="menu"><input id="inGameId"><button id="btUnirse">Unirse</button><button id="btNuevo">Nuevo</button></div>
+    <div id="board" class="board"></div>
+</body>

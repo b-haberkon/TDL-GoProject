@@ -325,7 +325,26 @@ func ShowGame(c *fiber.Ctx) error {
 } // Función externa
 
 func SelectPiece(c *fiber.Ctx) error {
-    return nil
+    return ctrlWrap(c, func(c *fiber.Ctx, rstTo chan bool) (SStr, []error) {
+		gameId, errGm := strconv.Atoi(c.Params("gameId"))
+		pieceId, errPi := strconv.Atoi(c.Params("pieceId"))
+		infoPlayer := <- getPlayerAndId(c)
+
+		errs := removeNils[error](infoPlayer.err, errGm, errPi)
+		if(len(errs)>0) {
+			fmt.Printf("DEBUG: SelectPiece: %v\n",errs)
+			return nil, errs
+		}
+
+		fmt.Printf("Player %v: in game %v, select piece %v…\n",
+			infoPlayer.val.Id.str(), gameId, pieceId )
+
+		intent := <- infoPlayer.val.Ptr.selectPiece(GameId{gameId},PieceId{pieceId});
+		if(intent.err != nil) {
+			return nil, []error{intent.err}
+		}
+		return intent.val.Show(), nil
+	})
 }
 
 func DeselectPiece(c *fiber.Ctx) error {
