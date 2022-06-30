@@ -3,6 +3,7 @@ package main
 import (
 	"system/database"
 	"system/routes"
+	"system/memotest"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -10,6 +11,7 @@ import (
 
 func main() {
 	database.Connect()
+	memotest.CtrlStart()
 	app := fiber.New()
 
 	app.Use(cors.New(cors.Config{
