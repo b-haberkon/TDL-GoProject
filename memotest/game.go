@@ -63,20 +63,28 @@ func NewGame(id GameId, config GameConfig, extra any) *Game {
 		limitate[uint8] (	&game.Config.Cols,	2, 16)
 		limitate[uint8] (	&game.Config.PMin,	1, 16)
 		limitate[uint8] (	&game.Config.PMax,	game.Config.PMin, 16)
+		// Asumimos que son pares, pieza central no existe
 		nPieces := int(game.Config.Rows) * int(game.Config.Cols)
+		centralRow := game.Config.Rows
+		centralCol := game.Config.Cols
 		if( (nPieces % 2) > 0) {
 			nPieces--
-		}
+			// Si son impares, remueve la central para que queden pares:
+			centralRow = game.Config.Rows/2;
+			centralCol = game.Config.Cols/2;
+			}
 		dest := shuffleSymbols(game.Config.Syms, nPieces)
 		var row, col uint8
-		var i PieceId = 0
+		i := PieceId{0}
 		for row=0; row<game.Config.Rows; row++ {
 			for col=0; col<game.Config.Cols; col++ {
-				pos := int(i) % len(dest)
-				i++
-				game.Pieces[i] = NewPiece(i, row, col, dest[pos])
-			}
-		}
+				if (centralRow != row) && (centralCol != col) {
+					pos := int(i.val) % len(dest)
+					i.inc()
+					game.Pieces[i] = NewPiece(i, row, col, dest[pos])
+				} // if(!central)
+			} // for col
+		} // for row
 	})
 	return &game
 }
@@ -223,4 +231,17 @@ func (game *Game) Kill(reason string) {
 	/** Notificar a games (falta llevar referencia). **/
 	/** Notificar a jugadores. **/
 	/** Matar piezas. **/
+}
+
+func (game *Game) getPiece(pieceId PieceId) RetWithError[*Piece] {
+	resp := NewRetWithError[*Piece]()
+	GameAsync(game, resp, func(loop *Loop) {
+		ret := WithError[*Piece]{nil,nil}
+		ret.val = game.Pieces[pieceId]
+		if( ret.val == nil) {
+			ret.err = errors.New("The piece does not exists")
+		}
+		resp.SendAndClose(ret);
+	})
+	return resp
 }

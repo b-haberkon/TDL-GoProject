@@ -3,9 +3,17 @@ package memotest
 import (
 	//"fmt"
 	"encoding/json"
+	"errors"
 	"strconv"
 )
-type PieceId int8
+type PieceId  struct { val int }
+func (id PieceId) str() string { return strconv.Itoa(id.val) }
+func (id* PieceId) inc() { (*id).val++ }
+func PieceIdFromStr(s string) (PieceId, error) {
+	val, err := strconv.Atoi(s)
+	return PieceId{val}, err
+}
+
 type PieceState int8
 
 const (
@@ -51,6 +59,20 @@ func NewPiece(id PieceId, row uint8, col uint8, symbol *Symbol) *Piece {
     return          piece
 }
 
+func PieceAsync[T any](piece *Piece,resp RetWithError[T], fn LoopFn) RetWithError[T] {
+	if (piece == nil) {
+		go func() {
+			ret := WithError[T]{}
+			ret.err = errors.New("Null piece")
+			resp.SendAndClose( ret )
+		} ()
+	} else {
+		piece.Loop.Async(fn)
+	}
+	return resp
+}
+
+
 func (piece *Piece) Show() chan string {
 	stream := make(chan string)
 	if(piece == nil) {
@@ -69,7 +91,7 @@ func (piece *Piece) Show() chan string {
 				}
 				stream <- `{"State":"` + state.str() + `"`
 				stream <- `,"Text":`  + string(text)
-				stream <- `,"Id":`  + strconv.Itoa(int( piece.Id  ))
+				stream <- `,"Id":`  + piece.Id.str()
 				stream <- `,"Row":` + strconv.Itoa(int( piece.Row ))
 				stream <- `,"Col":` + strconv.Itoa(int( piece.Col ))
 				stream <- `}`
@@ -78,4 +100,29 @@ func (piece *Piece) Show() chan string {
 		})
 	}
 	return stream
+}
+
+func (piece *Piece) Select(player *Player, playerId PlayerId) RetWithError[*MoveResult] {
+	resp := NewRetWithError[*MoveResult]()
+	ret := WithError[*MoveResult]{&MoveResult{Inexistent,make([]*Piece,2)}, nil}
+	return PieceAsync( piece, resp, func(loop *Loop) {
+		defer func() { resp.SendAndClose(ret)} () // Pase lo que pase, enviar una respuesta
+		ret.val.Pieces = append(ret.val.Pieces, piece)
+		switch piece.State {
+		case Hidden:
+			piece.State = Selected
+			piece.SelBy = playerId
+			ret.val.Status = Selection;
+		default:
+			ret.val.Status = Blocked
+		}
+	})
+}
+
+func (piece *Piece) Pair(player *Player, playerId PlayerId, another *Piece) RetWithError[*MoveResult] {
+	/** \todo Usar timeout para evitar interbloqueo **/
+	resp := NewRetWithError[*MoveResult]()
+	return PieceAsync( piece, resp, func(loop *Loop) {
+		resp.SendNewAndClose(nil, errors.New("Unimplemented"))
+	})
 }
