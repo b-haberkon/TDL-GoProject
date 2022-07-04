@@ -3,6 +3,7 @@ package memotest
 import (
     //"encoding/json" // Era usando para enviar JSON, ahora se hace por partes con stream
     "fmt"
+	"math"
 	"math/rand"
 	"strconv"
 	//"sync"
@@ -75,7 +76,7 @@ type ctrlWrapped func(*fiber.Ctx,chan bool) (SStr, []error);
  * métodos lleva a pánico; debería tambier ignorarlos.
  */
 func ctrlWrap(c *fiber.Ctx, ctrl ctrlWrapped ) error {
-	to,rst := timeout(60 * time.Second)
+	to,rst := timeout(5 * 60 * time.Second)
 	resp   := make(chan SStr)
 	go func() { 
 		str, errs := ctrl(c,rst)					// Llama al controlador
@@ -195,8 +196,9 @@ func getPlayerAndId(c *fiber.Ctx) RetWithError[PlayerWithId] {
 		ret.val.Id  = playerId
 		ret.val.Ptr = player
 		sess.Set("playerId",playerId.str())
+		sessId := sess.ID() // Expira luego de salvar
 		sess.Save()
-		fmt.Printf("Sesión %v, jugador %v.\n",sess.ID(),playerId.str())
+		fmt.Printf("Sesión %v, jugador %v.\n",sessId,playerId.str())
 		} () // Fin: La que realmente trae los valores
 	return resp
 }
@@ -255,9 +257,24 @@ func CreateGame(c *fiber.Ctx) error {
 		fmt.Printf("Player %v: creating game…\n", playerId)
 
 		var extra any = nil
+		cols := math.Floor(rng.Float64()*rng.Float64()*2)
+		if rng.Float64() < 0.5 {
+			cols = 4 + cols
+		} else {
+			cols = 4 - cols
+		}
+
+		var rows float64
+		if rng.Float64() < 0.5 {
+			rows = 6 - cols // Positivo que puede aumentar desde cols hasta el máximo
+		} else {
+			rows = 2 - cols // Negativo que puede disminuir dsde cols hasta el mínimo
+		}
+		rows = cols + math.Floor(rng.Float64()*rng.Float64()*rows)
+
 		config := GameConfig{
-			Rows : uint8(2+rng.Intn(8)),	// 2 a 10
-			Cols : uint8(2+rng.Intn(8)),	// 2 a 10
+			Rows : uint8(rows),
+			Cols : uint8(cols),
 			Syms : ej1,
 			PMin : uint8(1+rng.Intn(1)),	// 1 o 2 (simple )
 			PMax : uint8(2+rng.Intn(4)) }	// 2 a 6
@@ -336,10 +353,12 @@ func SelectPiece(c *fiber.Ctx) error {
 			return nil, errs
 		}
 
+		player, playerId := infoPlayer.val.Ptr, infoPlayer.val.Id
 		fmt.Printf("Player %v: in game %v, select piece %v…\n",
-			infoPlayer.val.Id.str(), gameId, pieceId )
+			playerId.str(), gameId, pieceId )
 
-		intent := <- infoPlayer.val.Ptr.selectPiece(GameId{gameId},PieceId{pieceId});
+
+		intent := <- player.selectPiece(GameId{gameId},PieceId{pieceId});
 		if(intent.err != nil) {
 			return nil, []error{intent.err}
 		}

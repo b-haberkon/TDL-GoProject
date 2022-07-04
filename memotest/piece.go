@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"strconv"
+	"time"
 )
 type PieceId  struct { val int }
 func (id PieceId) str() string { return strconv.Itoa(id.val) }
@@ -19,13 +20,15 @@ type PieceState int8
 const (
     Hidden PieceState = iota    // Estado inicial, la pieza no es visible.
     Selected                    // La pieza fue seleccionada por un jugador (visible)
-    Paired                      // La pieza fue emparejada con otra por un jugador
+    Matched                     // La pieza fue emparejada con otra por un jugador
+    Unmatched                   // La pieza no pudo ser emparejada con otra por un jugador
     Removed                     // La pieza fue removida al ser emparejada
 )
 var pieceStateToText = map[PieceState]string {
     Hidden		:	"Hidden",
     Selected	:	"Selected",
-    Paired		:	"Paired",
+    Matched		:	"Matched",
+    Unmatched	:	"Unmatched",
     Removed		:	"Removed",
 }
 func (st PieceState) str() string { return pieceStateToText[st] }
@@ -33,8 +36,9 @@ func (st PieceState) str() string { return pieceStateToText[st] }
 var pieceStateVisibility = map[PieceState]bool {
     Hidden		:	false,
     Selected	:	true,
-    Paired		:	true,
-    Removed		:	false,
+	Matched		:	true,
+	Unmatched	:	true,
+	Removed		:	false,
 }
 func (st PieceState) isVisible() bool { return pieceStateVisibility[st] }
 
@@ -104,15 +108,16 @@ func (piece *Piece) Show() chan string {
 
 func (piece *Piece) Select(player *Player, playerId PlayerId) RetWithError[*MoveResult] {
 	resp := NewRetWithError[*MoveResult]()
-	ret := WithError[*MoveResult]{&MoveResult{Inexistent,make([]*Piece,2)}, nil}
+	ret := WithError[*MoveResult]{NewMoveResult(Inexistent), nil}
 	return PieceAsync( piece, resp, func(loop *Loop) {
 		defer func() { resp.SendAndClose(ret)} () // Pase lo que pase, enviar una respuesta
 		ret.val.Pieces = append(ret.val.Pieces, piece)
 		switch piece.State {
 		case Hidden:
-			piece.State = Selected
-			piece.SelBy = playerId
+			piece.toState( Selected, playerId )
 			ret.val.Status = Selection;
+		case Removed:
+			ret.val.Status = Inexistent
 		default:
 			ret.val.Status = Blocked
 		}
@@ -120,9 +125,70 @@ func (piece *Piece) Select(player *Player, playerId PlayerId) RetWithError[*Move
 }
 
 func (piece *Piece) Pair(player *Player, playerId PlayerId, another *Piece) RetWithError[*MoveResult] {
-	/** \todo Usar timeout para evitar interbloqueo **/
+	/** \todo Evitar interbloqueo si ambas se seleccionan a mensajean a la vez. **/
 	resp := NewRetWithError[*MoveResult]()
+	ret := WithError[*MoveResult]{NewMoveResult(Blocked), nil}
 	return PieceAsync( piece, resp, func(loop *Loop) {
-		resp.SendNewAndClose(nil, errors.New("Unimplemented"))
+		defer resp.SendAndClose(ret)
+		if (piece.State == Hidden) && (piece != another) { // La segunda pieza debe estar oculta
+			ret.val.Status = another.isMatch(piece.Symbol, playerId) // ¿La primera pieza coincide?
+			if (ret.val.Status == Match) {
+				piece.toState(Matched, playerId);
+			} else if(ret.val.Status == Unmatch) {
+				piece.toState(Unmatched, playerId);
+			}
+		}
+	})
+}
+
+var stateExpiration = map[PieceState]time.Duration {
+    Hidden		:	0,
+    Selected	:	10 * time.Second,
+    Matched		:	4 * time.Second,
+    Unmatched	:	2 * time.Second,
+    Removed		:	0,
+}
+var stateAfterExpiration = map[PieceState]PieceState {
+    Hidden		:	Hidden,
+    Selected	:	Hidden,
+    Matched		:	Removed,
+    Unmatched	:	Hidden,
+    Removed		:	Removed,
+}
+/** Llamada sólo por otra pieza. **/
+func (piece *Piece) isMatch(symbol Symbol, playerId PlayerId) MoveResultStatus {
+	if(piece == nil) {
+		return Inexistent
+	}
+	resp := make(chan MoveResultStatus)
+	piece.Loop.Async( func(loop *Loop) {
+		if (piece.SelBy != PlayerId{0}) {
+			resp <- Blocked
+			return
+		} else if (piece.Symbol.Pair == symbol.Pair) {
+			resp <- Match
+			piece.toState(Matched, playerId)
+		} else {
+			resp <- Unmatch
+			piece.toState(Unmatched, playerId)
+		}
+	})
+	return <- resp
+}
+
+/** Ejecutada dentro del bucle. **/
+func (piece *Piece) toState(state PieceState, playerId PlayerId) {
+	if(piece == nil) {
+		return
+	}
+	piece.State = state
+	piece.SelBy = playerId
+	piece.Loop.Async(func(loop *Loop) {
+		to, _ := timeout(stateExpiration[state])
+		if (<- to) && (piece.State == state) && ( piece.SelBy == playerId ) {
+			piece.State = stateAfterExpiration[state]
+			piece.SelBy = PlayerId{0}
+			/** ¿Notificación? **/
+		}
 	})
 }

@@ -97,7 +97,12 @@ func (player *Player) NewGame(games *Games, config GameConfig, extra any) RetWit
 func (player *Player) JoinGame(game *Game) RetWithError[*Game] {
 	resp := NewRetWithError[*Game]()
 	return PlayerAsync( player, resp, func(loop *Loop) {
-		// Si está en un juego, no puede unirse a uno
+		// Si ya está en el mismo juego, devuelve el mismo juego
+		if (player.Playing == game) {
+			resp.SendNewAndClose(game, nil)
+			return
+		}
+		// Si está en otro juego, no puede unirse a uno
 		if (player.Playing != nil) {
 			previous := <- player.Playing.GetId()
 			txt := fmt.Sprintf(`Already playing %v`, previous.val.str() )
@@ -156,22 +161,20 @@ func (player *Player) selectPiece(gameId GameId,pieceId PieceId) RetWithError[*M
 		 * además, mientras espera una respuesta podría devolver el error de "seleccionando".
 		 **/
 		piece := pieceIntent.val;
+		var intent WithError[*MoveResult]
 		if(player.Selected == nil) {							// Es la primera que selecciono
-			selIntent := <- piece.Select(player, player.Id)		// Intento seleccionarla (mientras, el jugador queda bloqueado)
-			if(selIntent.err != nil) {
-				resp.SendNewAndClose(nil,selIntent.err)
-				return
-			}
-			player.Selected = piece;
+			intent = <- piece.Select(player, player.Id)		// Intento seleccionarla (mientras, el jugador queda bloqueado)
+			if(intent.err == nil) {
+				player.Selected = piece;
+			} //if !err
 		} else {
-			pairIntent := <- piece.Pair(player, player.Id, player.Selected)
-			if(pairIntent.err != nil) {
-				resp.SendNewAndClose(nil,pairIntent.err)
-				return
-			}
-			player.Owned = append(player.Owned, piece)
-			player.Owned = append(player.Owned, player.Selected)
-			player.Selected = nil
-		}
-	})
+			intent = <- piece.Pair(player, player.Id, player.Selected)
+			if(intent.err == nil) {
+				player.Owned = append(player.Owned, piece)
+				player.Owned = append(player.Owned, player.Selected)
+				player.Selected = nil
+			} // if !err
+		} // if !player.Selected else
+		resp <- intent
+	}) // async
 }

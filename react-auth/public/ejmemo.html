@@ -93,14 +93,18 @@ class MemoPieceAbstractState {
         return el;
     }
     async click(ev) {
-        const resp = await fetch(APIURL+'memo/'+this.game.gameId+'/'+this.piece.getId(),{method:'PUT'});
+        const resp = await fetch(
+            APIURL+'memo/'+this.game.gameId+'/'+this.piece.getId(),
+            { credentials: "include", method:'PUT' });
         if(!resp.ok)
             throw 'HTTP Error '+resp.status;
         const data = await resp.json();
         if('piece' in data)
             this.piece.update(data);
         //if('error' in data)
-        throw data;
+        const ex = Error(data?.error?.message||JSON.stringify(data))
+        ex.data = data;
+        throw ex;
     }
 }
 class MemoPieceHiddenState extends MemoPieceAbstractState {
@@ -192,6 +196,9 @@ class MemoGame extends HtmlWrap {
             this.piecesById[piece.getId()]=piece;
         }
     }
+    async bye() {
+        this.el.innerHTML = '';
+    }
     async draw() {
         const el = this.el;
         el.innerHTML = '';
@@ -245,7 +252,7 @@ class MemoMenu extends HtmlWrap {
         }
     }
     async startGame(url,config) {
-        const resp = await fetch(url, config);
+        const resp = await fetch(url, Object.assign({credentials: "include"},config));
         if(!resp.ok)
             return await this.showResponse(resp);
         const data = await resp.json();
@@ -253,6 +260,10 @@ class MemoMenu extends HtmlWrap {
             return await this.showJsonError(data);
         try {
             console.log('game',data);
+            if(window.game) {
+                window.game.bye();
+                window.game = null;
+            }
             window.game = new MemoGame(data);
             this.inGameId.value = window.game.gameId;
             window.game.draw();
@@ -268,6 +279,10 @@ window.addEventListener('load',_=>window.menu = new MemoMenu());
     </script>
 </head>
 <body>
-    <div id="menu"><input id="inGameId"><button id="btUnirse">Unirse</button><button id="btNuevo">Nuevo</button></div>
+    <div id="menu">
+        <input id="inGameId" />
+        <button id="btUnirse">Unirse</button>
+        <button id="btNuevo">Nuevo</button>
+    </div>
     <div id="board" class="board"></div>
 </body>
