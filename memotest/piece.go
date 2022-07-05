@@ -4,6 +4,7 @@ import (
 	//"fmt"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strconv"
 	"time"
 )
@@ -50,6 +51,7 @@ type Piece struct {
     Symbol  Symbol      
     State   PieceState  `json:"State"`
 	SelBy   PlayerId	`json:"SelBy"`
+	cancel  chan bool
 }
 
 var emptySymbol Symbol = Symbol{"", -1}
@@ -58,7 +60,7 @@ func NewPiece(id PieceId, row uint8, col uint8, symbol *Symbol) *Piece {
 	if(symbol == nil) {
 		symbol = &emptySymbol;
 	}
-    piece       :=  &Piece{nil, id, row, col, *symbol, Hidden, PlayerId{0}}
+    piece       :=  &Piece{nil, id, row, col, *symbol, Hidden, PlayerId{0}, nil}
     piece.Loop  =   NewLoop(piece)
     return          piece
 }
@@ -98,47 +100,13 @@ func (piece *Piece) Show() chan string {
 				stream <- `,"Id":`  + piece.Id.str()
 				stream <- `,"Row":` + strconv.Itoa(int( piece.Row ))
 				stream <- `,"Col":` + strconv.Itoa(int( piece.Col ))
+				stream <- `,"SelBy":` + piece.SelBy.str()
 				stream <- `}`
 				close(stream)
 				} ()
 		})
 	}
 	return stream
-}
-
-func (piece *Piece) Select(player *Player, playerId PlayerId) RetWithError[*MoveResult] {
-	resp := NewRetWithError[*MoveResult]()
-	ret := WithError[*MoveResult]{NewMoveResult(Inexistent), nil}
-	return PieceAsync( piece, resp, func(loop *Loop) {
-		defer func() { resp.SendAndClose(ret)} () // Pase lo que pase, enviar una respuesta
-		ret.val.Pieces = append(ret.val.Pieces, piece)
-		switch piece.State {
-		case Hidden:
-			piece.toState( Selected, playerId )
-			ret.val.Status = Selection;
-		case Removed:
-			ret.val.Status = Inexistent
-		default:
-			ret.val.Status = Blocked
-		}
-	})
-}
-
-func (piece *Piece) Pair(player *Player, playerId PlayerId, another *Piece) RetWithError[*MoveResult] {
-	/** \todo Evitar interbloqueo si ambas se seleccionan a mensajean a la vez. **/
-	resp := NewRetWithError[*MoveResult]()
-	ret := WithError[*MoveResult]{NewMoveResult(Blocked), nil}
-	return PieceAsync( piece, resp, func(loop *Loop) {
-		defer resp.SendAndClose(ret)
-		if (piece.State == Hidden) && (piece != another) { // La segunda pieza debe estar oculta
-			ret.val.Status = another.isMatch(piece.Symbol, playerId) // ¿La primera pieza coincide?
-			if (ret.val.Status == Match) {
-				piece.toState(Matched, playerId);
-			} else if(ret.val.Status == Unmatch) {
-				piece.toState(Unmatched, playerId);
-			}
-		}
-	})
 }
 
 var stateExpiration = map[PieceState]time.Duration {
@@ -155,17 +123,21 @@ var stateAfterExpiration = map[PieceState]PieceState {
     Unmatched	:	Hidden,
     Removed		:	Removed,
 }
-/** Llamada sólo por otra pieza. **/
+
+/** Llamada sólo por la segunda pieza. **/
 func (piece *Piece) isMatch(symbol Symbol, playerId PlayerId) MoveResultStatus {
 	if(piece == nil) {
-		return Inexistent
+		return Selection
 	}
 	resp := make(chan MoveResultStatus)
 	piece.Loop.Async( func(loop *Loop) {
-		if (piece.SelBy != PlayerId{0}) {
-			resp <- Blocked
+		available := (piece.State == Selected) && (piece.SelBy == playerId)
+		if (! available ) {
+			resp <- Selection
 			return
-		} else if (piece.Symbol.Pair == symbol.Pair) {
+		}
+		
+		if (piece.Symbol.Pair == symbol.Pair) {
 			resp <- Match
 			piece.toState(Matched, playerId)
 		} else {
@@ -182,13 +154,76 @@ func (piece *Piece) toState(state PieceState, playerId PlayerId) {
 		return
 	}
 	piece.State = state
+	fmt.Printf("Piece %v to state %v…\n",piece.Id,state)
 	piece.SelBy = playerId
-	piece.Loop.Async(func(loop *Loop) {
-		to, _ := timeout(stateExpiration[state])
-		if (<- to) && (piece.State == state) && ( piece.SelBy == playerId ) {
-			piece.State = stateAfterExpiration[state]
-			piece.SelBy = PlayerId{0}
-			/** ¿Notificación? **/
+	msExpiration := stateExpiration[state]
+	if( msExpiration == 0) {
+		piece.cancel = nil
+	} else {
+		// Programa un timeout
+		expiration, _, cancel := timeout(msExpiration)
+		// cancel quedará como closure, actualiza piece
+		piece.cancel = cancel
+		go func() {
+			res := <- expiration
+			piece.Loop.Async(func(*Loop) {
+				// Expiró y no cambió el timer (closure coincide con piece)
+				if (res) && (piece.cancel == cancel) {
+					piece.State = stateAfterExpiration[state]
+					piece.SelBy = PlayerId{0}
+					fmt.Printf("Piece %v back to state %v…\n",piece.Id,piece.State)
+				}
+			})
+		} ()
+	}
+}
+
+/**
+ * Intenta emparejar la pieza actual con previous, si previous está seleccionada.
+ * O si no, sólo intenta seleccionar la pieza actual.
+ * Puede devolver:
+ *   Status  | Pieces          | Cuándo
+ * Selection | actual,previous | La pieza previa no era válida o no está seleccionada por el jugador. Pero la actual sí.
+ * --otro--  | previous,actual | La pieza actual no era válida o no está hidden. La previa tal vez.
+ * Si la pieza previa estaba seleccionada por el jugador, y la pieza actual hidden:
+ * Match     | ambas           | Coinciden además en par.
+ * Unmatch   | ambas           | Pero no coinciden en par.
+ */
+func (piece *Piece) SelectOrPair(player *Player, playerId PlayerId, previous *Piece) RetWithError[*MoveResult] {
+	resp := NewRetWithError[*MoveResult]()
+	ret := WithError[*MoveResult]{NewMoveResult(Blocked), nil}
+	return PieceAsync( piece, resp, func(loop *Loop) {
+		defer resp.SendAndClose(ret)
+		// Si la actual no es válida, devuelve primero la otra
+		// para mantenerla como selección previa (sea o no buena)
+		fmt.Printf("*** DEBUG1: piece=%v,prev=%v,ret=%v\n",piece,previous,ret)
+		if (piece.State != Hidden ) || (piece.SelBy == playerId) {
+			if (piece.State == Removed) {
+				ret.val.Status = Inexistent
+			} else {
+				ret.val.Status = Blocked
+			}
+     		ret.val.Pieces = append(ret.val.Pieces, previous, piece)
+			 fmt.Printf("*** DEBUG2: piece=%v,prev=%v,ret=%v\n",piece,previous,ret)
+			 return
 		}
+		// En cualquier otro caso, la actual va primero;
+		// pero devuelve ambas para que se actualicen ambos estados.
+		ret.val.Pieces = append(ret.val.Pieces, piece, previous)
+		fmt.Printf("*** DEBUG3: piece=%v,prev=%v,ret=%v,%v\n",piece,previous,ret.val.Status,ret.val.Pieces)
+
+		// Estando ésta disponible para matchear, intenta hacerlo con la previa
+		ret.val.Status = previous.isMatch(piece.Symbol, playerId)
+		fmt.Printf("*** DEBUG4a: match status=%v\n",ret.val.Status)
+		switch( ret.val.Status ) {
+		case Match:		// previous es seleccionable, y hubo coincidencia
+			piece.toState(Matched, playerId)	// Acompaña a la otra en estado
+		case Unmatch: 	// previous es seleccionable, y no hubo coincidencia
+			piece.toState(Unmatched, playerId)	// Acompaña a la otra en estado
+		default:		// En otro caso, previous no se modifica, pero piece es válida
+			piece.toState( Selected, playerId )	// Entonces se selecciona piece
+			ret.val.Status = Selection;			// Y siempre será una selección
+		}
+		fmt.Printf("*** DEBUG4b: piece=%v,prev=%v,ret=%v,%v\n",piece,previous,ret.val.Status,ret.val.Pieces)
 	})
 }

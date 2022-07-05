@@ -161,20 +161,20 @@ func (player *Player) selectPiece(gameId GameId,pieceId PieceId) RetWithError[*M
 		 * además, mientras espera una respuesta podría devolver el error de "seleccionando".
 		 **/
 		piece := pieceIntent.val;
-		var intent WithError[*MoveResult]
-		if(player.Selected == nil) {							// Es la primera que selecciono
-			intent = <- piece.Select(player, player.Id)		// Intento seleccionarla (mientras, el jugador queda bloqueado)
-			if(intent.err == nil) {
-				player.Selected = piece;
-			} //if !err
-		} else {
-			intent = <- piece.Pair(player, player.Id, player.Selected)
-			if(intent.err == nil) {
-				player.Owned = append(player.Owned, piece)
-				player.Owned = append(player.Owned, player.Selected)
+		//var intent WithError[*MoveResult]
+		intent := <- piece.SelectOrPair(player, player.Id, player.Selected)
+		if(intent.err == nil) {
+			switch( intent.val.Status ) {
+			case Match:
+				player.Owned = append(player.Owned, piece, player.Selected)
 				player.Selected = nil
-			} // if !err
-		} // if !player.Selected else
+			case Unmatch:
+				player.Selected = nil
+			default:
+				player.Selected = intent.val.Pieces[0]
+			} // switch
+		} // if (! intent.err )
+		fmt.Printf("** DEBUG5: Selected=%v\n",player.Selected)
 		resp <- intent
 	}) // async
 }

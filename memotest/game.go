@@ -172,7 +172,7 @@ func (cfg *GameConfig) Show() chan string {
 }
 
 
-func (game *Game) Show() chan string {
+func (game *Game) Show(player *Player, playerId PlayerId) chan string {
 	stream := make(chan string)
 	if(game == nil) {
 		go func() {
@@ -190,6 +190,7 @@ func (game *Game) Show() chan string {
 
 				stream <- `{"status":"` + status.str() + `"`
 				stream <- `,"gameId":` + game.Id.str()
+				stream <- `,"playerId":` + playerId.str()
 				stream <- `,"players":[`
 				for i, player := range players {
 					if(i>0) {

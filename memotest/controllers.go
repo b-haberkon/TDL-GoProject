@@ -39,16 +39,25 @@ var ej1 []*Symbol = []*Symbol {
  * además es posible reiniciar el tiempo escribiendo
  * en el segundo ganal.
  * @param d Duración del tiempo de espera.
- * \todo ¿Cambiar el canal de reset por un chan time.Duration?
+ * @return
+ * * ret Canal donde se escribe el resultado del timeout:
+ *       true = cayó por timeout, false = fue cancelado
+ * * Canal donde se escribe un nuevo tiempo para reiniciarlo.
+ * * Canal donde se puede escribir para cancelarlo.
  **/
-func timeout(d time.Duration) (chan bool, chan bool) {
+func timeout(d time.Duration) (chan bool, chan time.Duration, chan bool) {
 	resp := make(chan bool)
-	rst  := make(chan bool)
+	rst  := make(chan time.Duration)
+	bye  := make(chan bool)
 	go func() {
 		exit := false
 		for {
 			select {
-			case <- rst:			// Mientras haya algo para leer en reset,
+			case <- bye:
+				resp<-false
+				close(resp)
+				return
+			case d = <- rst:			// Mientras haya algo para leer en reset,
 				exit = false		// simplemente se asegura de que exit sea false.
 			default:				// Sólo si no hay un reset,
 				if(exit) {			// si no hubo un reset entre la última espera y esta iteración,
@@ -62,12 +71,12 @@ func timeout(d time.Duration) (chan bool, chan bool) {
 			} // select
 		} // for
 	} ()
-	return resp, rst
+	return resp, rst, bye
 }
 
 // Auxiliar para ctrlWrap, es el tipo de la función que será pasada,
 // escrita por separado para aumentar la legibilidad.
-type ctrlWrapped func(*fiber.Ctx,chan bool) (SStr, []error);
+type ctrlWrapped func(*fiber.Ctx,chan time.Duration) (SStr, []error);
 
 /** @brief Envuelve a una función de controlador que devuelve la respuesta,
  * de forma que si la envuelta no finaliza a tiempo, la envolvente responderá
@@ -76,7 +85,7 @@ type ctrlWrapped func(*fiber.Ctx,chan bool) (SStr, []error);
  * métodos lleva a pánico; debería tambier ignorarlos.
  */
 func ctrlWrap(c *fiber.Ctx, ctrl ctrlWrapped ) error {
-	to,rst := timeout(5 * 60 * time.Second)
+	to,rst,bye := timeout(5 * 60 * time.Second)
 	resp   := make(chan SStr)
 	go func() { 
 		str, errs := ctrl(c,rst)					// Llama al controlador
@@ -109,9 +118,10 @@ func ctrlWrap(c *fiber.Ctx, ctrl ctrlWrapped ) error {
 					if done {
 						fmt.Printf("Out of time answer discarded\n")
 					} else {
+						chanStr <- recv
 						done = true
 						httpCode = 200
-						chanStr <- recv
+						bye <- true 
 					} // done
 				} else { // !ok
 					resp = nil
@@ -247,7 +257,7 @@ func CtrlStart() {
 
 /** @brief Intenta crear un juego. **/
 func CreateGame(c *fiber.Ctx) error {
-	return ctrlWrap(c, func(c *fiber.Ctx, rstTo chan bool) (SStr, []error) {
+	return ctrlWrap(c, func(c *fiber.Ctx, rstTo chan time.Duration) (SStr, []error) {
 		playerInfo := <- getPlayerAndId(c)
 		if(playerInfo.err != nil) {
 			return nil, []error{playerInfo.err}
@@ -286,14 +296,14 @@ func CreateGame(c *fiber.Ctx) error {
 
 		fmt.Printf("Player %v: create game %v (%v×%v)\n",
 			playerId, intent.val.Id, config.Cols, config.Rows)
-		return intent.val.Show(), nil
+		return intent.val.Show(player,playerId), nil
 	}) // Función interna y llamada
 } // Función externa
 
 
 /** @brief Intenta unirse a un juego. **/
 func JoinGame(c *fiber.Ctx) error {
-	return ctrlWrap(c, func(c *fiber.Ctx, rstTo chan bool) (SStr, []error) {
+	return ctrlWrap(c, func(c *fiber.Ctx, rstTo chan time.Duration) (SStr, []error) {
 		// Lanzo las dos subrutinas
 		chanPlayer := getPlayerAndId(c)
 		chanGame   := getGameAndId(c)
@@ -315,13 +325,13 @@ func JoinGame(c *fiber.Ctx) error {
 		if(intent.err != nil) {
 			return nil, []error{intent.err}
 		}
-		return intent.val.Show(), nil
+		return intent.val.Show(player,playerId), nil
 	}) // Función interna y llamada
 } // Función externa
 
 /** Intenta mostrar un juego. **/
 func ShowGame(c *fiber.Ctx) error {
-	return ctrlWrap(c, func(c *fiber.Ctx, rstTo chan bool) (SStr, []error) {
+	return ctrlWrap(c, func(c *fiber.Ctx, rstTo chan time.Duration) (SStr, []error) {
 		// Lanzo las dos subrutinas
 		chanPlayer := getPlayerAndId(c)
 		chanGame   := getGameAndId(c)
@@ -336,13 +346,13 @@ func ShowGame(c *fiber.Ctx) error {
 		fmt.Printf("Player %v: watch game %v…\n",
 			infoPlayer.val.Id, infoGame.val.Id.str() )
 		game := infoGame.val.Ptr
-		data := game.Show()
+		data := game.Show(infoPlayer.val.Ptr,infoPlayer.val.Id)
 		return data, nil
 	}) // Función interna y llamada
 } // Función externa
 
 func SelectPiece(c *fiber.Ctx) error {
-    return ctrlWrap(c, func(c *fiber.Ctx, rstTo chan bool) (SStr, []error) {
+    return ctrlWrap(c, func(c *fiber.Ctx, rstTo chan time.Duration) (SStr, []error) {
 		gameId, errGm := strconv.Atoi(c.Params("gameId"))
 		pieceId, errPi := strconv.Atoi(c.Params("pieceId"))
 		infoPlayer := <- getPlayerAndId(c)

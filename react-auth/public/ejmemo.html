@@ -21,6 +21,22 @@
     flex-grow:1;
     margin: 0.5em;
 }
+.pieceSelected {
+    border: dashed red;
+    box-shadow: 5px red;
+}
+.pieceRemoved {
+    border: dashed #ccc;
+    background-color:rgba(255,255,255,0.1)
+}
+.pieceMatched {
+    border: solid red;
+    box-shadow: 8px #fff;
+}
+.pieceUnmatched {
+    border: dotted red;
+    box-shadow: 8px #fff;
+}
     </style>
     <script>
 const APIURL = '//localhost:8000/api/';
@@ -32,17 +48,21 @@ class HtmlWrap {
         }
         
         for(const [elName,elData] of Object.entries(pairs)) {
-        const el = this[elName] = document.getElementById(elName);
-        for(const [evName,fnName] of Object.entries(elData)) {
-            var fn = this[fnName];
-            if(!fn) {
-                console.error('Method '+fnName+' unknown')
-                continue;
+            if(elData) {
+                const el = this[elName] = document.getElementById(elName);
+                for(const [evName,fnName] of Object.entries(elData)) {
+                    var fn = this[fnName];
+                    if(!fn) {
+                        console.error('Method '+fnName+' unknown')
+                        continue;
+                    }
+                    fn = this[fnName] = fn.bind(this);
+                    el.addEventListener(evName,fn);
+                }
+            } else { // elData
+                this[elName] = this[elName].bind(this);
             }
-            fn = this[fnName] = fn.bind(this);
-            el.addEventListener(evName,fn);
-        }
-    }
+        } // for elName,elData of pairs
     }
     async showResponse(resp) {
         const tit = 'Error HTTP '+resp.status + ': ' + resp.statusText;
@@ -52,7 +72,9 @@ class HtmlWrap {
     }
     async showJsonError(data) {
         console.error(data);
-        alert('Response has error:'+data?.message?('\n\n'+data.message):'');
+        const message = data?.error?.message;
+        const title = 'Response has error';
+        alert( title + ( message?(':\n\n'+message):'' ) );
     }
 }
 
@@ -78,14 +100,15 @@ class MemoPlayer {
 }
 
 class MemoPieceAbstractState {
-    constructor(game,piece,name) {
+    constructor(game,piece,name,selBy) {
         this.game  = game;
         this.piece = piece;
         this.name  = name;
+        this.selBy = selBy;
     }
     async draw(el) {
         const tx = document.createElement('div');
-        tx.className = 'pieceText'
+        tx.className = 'pieceText';
         tx.innerText = await this.piece.getText();
         el.innerHTML = '';
         el.className = 'piece piece'+this.name;
@@ -99,43 +122,63 @@ class MemoPieceAbstractState {
         if(!resp.ok)
             throw 'HTTP Error '+resp.status;
         const data = await resp.json();
-        if('piece' in data)
-            this.piece.update(data);
+        if('pieces' in data)
+            return this.game.update(data, true);
         //if('error' in data)
         const ex = Error(data?.error?.message||JSON.stringify(data))
         ex.data = data;
         throw ex;
     }
+    isEqual(another) {
+        return (another.selBy == this.selBy) && (another.name == this.name);
+    }
 }
 class MemoPieceHiddenState extends MemoPieceAbstractState {
     constructor(game,piece,name) {
-        super(game,piece,name);
+        super(game,piece,name,0);
     }
 }
 class MemoPieceSelectedState extends MemoPieceAbstractState {
 }
-class MemoPiecePairedState extends MemoPieceAbstractState {
+class MemoPieceMatchedState extends MemoPieceAbstractState {
+}
+class MemoPieceUnmatchedState extends MemoPieceAbstractState {
 }
 class MemoPieceRemovedState extends MemoPieceAbstractState {
+    constructor(game,piece,name) {
+        super(game,piece,name,0);
+    }
     async click(ev) {
         // No debe hacer nada.
     }
 }
 const MemoPieceStates = {
-    'Hidden':   MemoPieceHiddenState,   // Estado inicial, la pieza no es visible.
-    'Selected': MemoPieceSelectedState, // La pieza fue seleccionada por un jugador (visible)
-    'Paired':   MemoPiecePairedState,   // La pieza fue emparejada con otra por un jugador
-    'Removed':  MemoPieceRemovedState,  // La pieza fue removida al ser emparejada
+    'Hidden':    MemoPieceHiddenState,      // Estado inicial, la pieza no es visible.
+    'Selected':  MemoPieceSelectedState,    // La pieza fue seleccionada por un jugador (visible)
+    'Matched':   MemoPieceMatchedState,     // La pieza fue emparejada con otra por un jugador
+    'Unmatched': MemoPieceUnmatchedState,   // La pieza no pudo ser emparejada
+    'Removed':   MemoPieceRemovedState,     // La pieza fue removida al ser emparejada
 }
 class MemoPieceState {
-    constructor(game,piece,name) {
-        const cl = MemoPieceStates[name];
-        if(!cl) throw "Piece state unexpected: "+name;
-        this.state = new cl(game,piece,name);
+    constructor(game,piece,name,selBy) {
+        this.state = this.createChild(game,piece,name,selBy);
         this.game = game;
         this.piece = piece;
+        this.selBy = selBy
         const direct = ['draw','click'];
         direct.map(name=>this[name]=(...args)=>this.state[name](...args));
+    }
+    createChild(game,piece,name,selBy) {
+        const cl = MemoPieceStates[name];
+        if(!cl) throw "Piece state unexpected: "+name;
+        return new cl(game,piece,name,selBy);
+    }
+    changeTo(newName,newSelBy) {
+        const newState = this.createChild(this.game,this.piece,newName,newSelBy)
+        if( newState.isEqual(this.state) )
+            return false;
+        this.state = newState;
+        return true;
     }
 }
 
@@ -160,7 +203,6 @@ class MemoPiece extends HtmlWrap {
                 await this[name](ev);
             } catch(ex) {
                 console.error(ex);
-                alert(ex);
             }
         }));
     }
@@ -168,19 +210,25 @@ class MemoPiece extends HtmlWrap {
         return await this.state.draw(this.el);
     }
     async setData(data) {
-        this.state = new MemoPieceState(this.game,this,data.State);
+        if(this.state) {
+            if(!this.state.changeTo(data.State,data.SelBy))
+                return false;
+        } else {
+            this.state = new MemoPieceState(this.game,this,data.State,data.SelBy);
+        }
         MemoPieceDirectProps.map(name=>{
             this['_'+name]=data[name];
         });
+        return true
     }
     async update(data) {
-        await this.setData(data);
-        await this.draw(this.el);
+        if(await this.setData(data))
+            await this.draw(this.el);
     }
 }
 class MemoGame extends HtmlWrap {
     constructor(data) {
-        super('board',{});
+        super('board',{'update':null});
         this.status = new MemoGameStatus(this,data.status);
         this.gameId = Number(data.gameId);
         this.config = data.config;
@@ -195,6 +243,7 @@ class MemoGame extends HtmlWrap {
             this.piecesByPos[piece.getRow()][piece.getCol()] = piece;
             this.piecesById[piece.getId()]=piece;
         }
+        this.refresh();
     }
     async bye() {
         this.el.innerHTML = '';
@@ -222,6 +271,39 @@ class MemoGame extends HtmlWrap {
         el.className = 'pieceRemoved'
         return el;
     }
+    async update(data,recent) {
+        this.recent = !!recent;
+        for(const pieceData of (data?.pieces||[]) ) {
+            const piece = this.piecesById[pieceData?.Id];
+            if(piece) {
+                piece.update(pieceData);
+            }
+        }
+    }
+    async refresh() {
+        /** \usar this.status para no refrescar una vez que terminó. **/
+        try {
+            if(!this.recent) {
+                const url = APIURL + 'memo/'+this.gameId;
+                const resp = await fetch(url, {credentials: "include", method:'GET'});
+                if(!resp.ok)
+                    return await this.showResponse(resp);
+                const data = await resp.json();
+                if('pieces' in data)
+                    this.update(data, false);
+                else {
+                    const ex = Error(data?.error?.message||JSON.stringify(data))
+                    ex.data = data;
+                    throw ex;
+                }
+            }
+            setTimeout(this.refresh.bind(this),500);
+        } catch(ex) {
+            console.error(ex);
+            alert("Hubo un problema refrescando el juego, presione 'Unirse' para reintentar.");
+        }
+        this.recent = false;
+    }
 }
 class MemoMenu extends HtmlWrap {
     constructor() {
@@ -247,7 +329,7 @@ class MemoMenu extends HtmlWrap {
         return await this.startGame(url,{method: 'POST'});
     }
     async idKeyUp(ev) {
-        if(e.key === 'Enter' || e.keyCode === 13) {
+        if(ev.key === 'Enter' || ev.keyCode === 13) {
             return await this.unirse(ev);
         }
     }
