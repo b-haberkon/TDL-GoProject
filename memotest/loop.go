@@ -1,6 +1,6 @@
 package memotest
 
-import "fmt"
+//import "fmt"
 
 type LoopFn func(*Loop)
 
@@ -20,9 +20,9 @@ func NewLoop(extra any) *Loop {
     loop := Loop{ make(chan LoopCall), extra }
     go func() {
         for call := range loop.Queue {
-			fmt.Printf("Bloqueando bucle %v %v…\n", loop, loop.Extra)
+			//fmt.Printf("Bloqueando bucle %v %v…\n", loop, loop.Extra)
             call.Fn(&loop)
-			fmt.Printf("…Desbloqueando bucle %v %v.\n", loop, loop.Extra)
+			//fmt.Printf("…Desbloqueando bucle %v %v.\n", loop, loop.Extra)
         }
     } ()
     return &loop

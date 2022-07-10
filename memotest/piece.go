@@ -49,6 +49,7 @@ type Piece struct {
 	Row		uint8		`json:"Row"`
 	Col		uint8		`json:"Col"`
     Symbol  Symbol      
+	Game	*Game		`json:"Game"`
     State   PieceState  `json:"State"`
 	SelBy   PlayerId	`json:"SelBy"`
 	cancel  chan bool
@@ -56,11 +57,11 @@ type Piece struct {
 
 var emptySymbol Symbol = Symbol{"", -1}
 
-func NewPiece(id PieceId, row uint8, col uint8, symbol *Symbol) *Piece {
+func NewPiece(id PieceId, row uint8, col uint8, symbol *Symbol, game *Game) *Piece {
 	if(symbol == nil) {
 		symbol = &emptySymbol;
 	}
-    piece       :=  &Piece{nil, id, row, col, *symbol, Hidden, PlayerId{0}, nil}
+    piece       :=  &Piece{nil, id, row, col, *symbol, game, Hidden, PlayerId{0}, nil}
     piece.Loop  =   NewLoop(piece)
     return          piece
 }
@@ -125,7 +126,7 @@ var stateAfterExpiration = map[PieceState]PieceState {
 }
 
 /** Llamada sólo por la segunda pieza. **/
-func (piece *Piece) isMatch(symbol Symbol, playerId PlayerId) MoveResultStatus {
+func (piece *Piece) isMatch(symbol Symbol, player *Player, playerId PlayerId) MoveResultStatus {
 	if(piece == nil) {
 		return Selection
 	}
@@ -139,17 +140,17 @@ func (piece *Piece) isMatch(symbol Symbol, playerId PlayerId) MoveResultStatus {
 		
 		if (piece.Symbol.Pair == symbol.Pair) {
 			resp <- Match
-			piece.toState(Matched, playerId)
+			piece.toState(Matched, player, playerId)
 		} else {
 			resp <- Unmatch
-			piece.toState(Unmatched, playerId)
+			piece.toState(Unmatched, player, playerId)
 		}
 	})
 	return <- resp
 }
 
 /** Ejecutada dentro del bucle. **/
-func (piece *Piece) toState(state PieceState, playerId PlayerId) {
+func (piece *Piece) toState(state PieceState, player *Player, playerId PlayerId) {
 	if(piece == nil) {
 		return
 	}
@@ -172,6 +173,9 @@ func (piece *Piece) toState(state PieceState, playerId PlayerId) {
 					piece.State = stateAfterExpiration[state]
 					piece.SelBy = PlayerId{0}
 					fmt.Printf("Piece %v back to state %v…\n",piece.Id,piece.State)
+					if(piece.State == Removed) {
+						piece.Game.PieceRemoved(piece, player, 1)
+					}
 				}
 			})
 		} ()
@@ -213,17 +217,26 @@ func (piece *Piece) SelectOrPair(player *Player, playerId PlayerId, previous *Pi
 		fmt.Printf("*** DEBUG3: piece=%v,prev=%v,ret=%v,%v\n",piece,previous,ret.val.Status,ret.val.Pieces)
 
 		// Estando ésta disponible para matchear, intenta hacerlo con la previa
-		ret.val.Status = previous.isMatch(piece.Symbol, playerId)
+		ret.val.Status = previous.isMatch(piece.Symbol, player, playerId)
 		fmt.Printf("*** DEBUG4a: match status=%v\n",ret.val.Status)
 		switch( ret.val.Status ) {
 		case Match:		// previous es seleccionable, y hubo coincidencia
-			piece.toState(Matched, playerId)	// Acompaña a la otra en estado
+			piece.toState(Matched, player, playerId)	// Acompaña a la otra en estado
 		case Unmatch: 	// previous es seleccionable, y no hubo coincidencia
-			piece.toState(Unmatched, playerId)	// Acompaña a la otra en estado
+			piece.toState(Unmatched, player, playerId)	// Acompaña a la otra en estado
 		default:		// En otro caso, previous no se modifica, pero piece es válida
-			piece.toState( Selected, playerId )	// Entonces se selecciona piece
+			piece.toState( Selected, player, playerId )	// Entonces se selecciona piece
 			ret.val.Status = Selection;			// Y siempre será una selección
 		}
 		fmt.Printf("*** DEBUG4b: piece=%v,prev=%v,ret=%v,%v\n",piece,previous,ret.val.Status,ret.val.Pieces)
+	})
+}
+
+func (piece *Piece) Die() {
+	if(piece == nil) {
+		return
+	}
+	piece.Loop.Async(func(loop *Loop) {
+		loop.Close()
 	})
 }

@@ -2,12 +2,13 @@ import React, { useEffect, useState } from 'react';
 import logo from './logo.svg';
 import './App.css';
 import Login from './pages/Login'
-import Nav from './components/Nav'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
 import Home from './pages/Home'
 import Register from './pages/Register'
 import Error from './pages/Error'
 import Footer from './components/footer';
+import Navbar from './components/Navbar';
+import Nav from './components/Navbar';
 
 
 function App() {

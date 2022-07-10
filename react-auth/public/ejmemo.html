@@ -25,6 +25,9 @@
     border: dashed red;
     box-shadow: 5px red;
 }
+.other {
+    border-color: blue !important;
+}
 .pieceRemoved {
     border: dashed #ccc;
     background-color:rgba(255,255,255,0.1)
@@ -39,7 +42,8 @@
 }
     </style>
     <script>
-const APIURL = '//localhost:8000/api/';
+const APIPORT = 8000;
+const APIURL = '//' + window.location.hostname + ':' + APIPORT + '/api/';
 class HtmlWrap {
     constructor(id,pairs) {
         if(!(this.el = document.getElementById(id))) {
@@ -78,17 +82,85 @@ class HtmlWrap {
     }
 }
 
-class MemoGamePlayingStatus {
+class MemoGameAbstractStatus {
+    constructor(game) {
+        this.game = game;
+    }
+    getRefreshRate() {
+        return 500;
+    }
+    async updatePieces(data) {
+        for(const pieceData of (data?.pieces||[]) ) {
+            const piece = this.game?.piecesById[pieceData?.Id];
+            if(piece) {
+                piece.update(pieceData);
+            }
+        }
+    }
+
+    async updateStatus(data) {
+        if(!data.status) return;
+        // ¿Debe cambiar? Actualizar en padre.
+        const elSt = document.getElementById('status');
+        if(elSt) elSt.value = data.status;
+    }
+
+    async updatePlayers(data) {
+        if(!data.players)
+            return;
+        const plList = document.getElementById('plList');
+        if(!plList)
+            return;
+        plList.innerHTML = '';
+        for(const pl of data.players.sort((a,b)=>(b?.Points??0)-(a?.Points||0))) {
+            const name = pl?.name || pl?.playerId || '?';
+            const same = pl?.playerId && (pl?.playerId == data?.playerId);
+            const pts  = ('Points' in pl)? ' ('+pl.Points+')' : '';
+            plList.innerHTML += '<li>'+(same?'<b>':'')+name+(same?'</b>':'')+pts+'</li>';
+        }
+    }
+}
+class MemoGamePlayingStatus extends MemoGameAbstractStatus {
 
 }
-    const MemoGameStatusDict = {
+class MemoGameEndedStatus extends MemoGameAbstractStatus {
+    async updatePieces(data) {
+        const rows = document.getElementsByClassName('memoRow')
+        for(const row of rows) {
+            row.style.display = 'none';
+            row.hidden = true;
+        }
+            
+    }
+    getRefreshRate() {
+        return -1;
+    }
+}
+const MemoGameStatusDict = {
     "Playing" : MemoGamePlayingStatus,
+    "Ended" : MemoGameEndedStatus,
 }
 class MemoGameStatus {
     constructor(game, name) {
+        this.game = game;
+        this.statusFromName(name);
+    }
+    statusFromName(name) {
         const cl = MemoGameStatusDict[name];
         if(!cl) throw "Game status unexpected: "+name;
-        this.status = new cl(game);
+        this.status = new cl(this.game);
+    }
+    async update(data) {
+        if(data.status)
+            this.statusFromName(data.status);
+        await Promise.all([
+            this.status.updateStatus(data),
+            this.status.updatePieces(data),
+            this.status.updatePlayers(data)
+        ]);
+    }
+    getRefreshRate() {
+        return this.status.getRefreshRate();
     }
 }
 
@@ -112,6 +184,9 @@ class MemoPieceAbstractState {
         tx.innerText = await this.piece.getText();
         el.innerHTML = '';
         el.className = 'piece piece'+this.name;
+        if (this.selBy && (this.selBy != this.game.playerId)) {
+            el.className+=' other'
+        }
         el.append(tx);
         return el;
     }
@@ -232,6 +307,7 @@ class MemoGame extends HtmlWrap {
         this.status = new MemoGameStatus(this,data.status);
         this.gameId = Number(data.gameId);
         this.config = data.config;
+        this.playerId = data.playerId;
         this.players = data.players
             .map(data=>new MemoPlayer(this,data));
         this.pieces = data.pieces
@@ -250,7 +326,7 @@ class MemoGame extends HtmlWrap {
     }
     async draw() {
         const el = this.el;
-        el.innerHTML = '';
+        el.innerHTML = '<div> <label for="status">Status:</label> <input readonly name="status" id="status" value=""> </div>';
         for(let row=0; row<this.config.Rows; row++) {
             const rowEl = document.createElement('div');
             rowEl.id="row"+row;
@@ -264,6 +340,9 @@ class MemoGame extends HtmlWrap {
                 }
             })();
         } // for
+        const plList = document.createElement('ol')
+        plList.id='plList';
+        el.append(plList);
         return el;
     }
     async empty() {
@@ -273,12 +352,7 @@ class MemoGame extends HtmlWrap {
     }
     async update(data,recent) {
         this.recent = !!recent;
-        for(const pieceData of (data?.pieces||[]) ) {
-            const piece = this.piecesById[pieceData?.Id];
-            if(piece) {
-                piece.update(pieceData);
-            }
-        }
+        await this.status.update(data);
     }
     async refresh() {
         /** \usar this.status para no refrescar una vez que terminó. **/
@@ -297,7 +371,9 @@ class MemoGame extends HtmlWrap {
                     throw ex;
                 }
             }
-            setTimeout(this.refresh.bind(this),500);
+            const refreshRate = this.status.getRefreshRate();
+            if(refreshRate>=0)
+                setTimeout(this.refresh.bind(this),refreshRate);
         } catch(ex) {
             console.error(ex);
             alert("Hubo un problema refrescando el juego, presione 'Unirse' para reintentar.");

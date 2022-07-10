@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 )
 
 type PlayerId struct { val int }
@@ -111,11 +112,13 @@ func (player *Player) JoinGame(game *Game) RetWithError[*Game] {
 		}
 		intent := <- game.Join(player)
 		resp <- intent
-		player.Playing = intent.val // el juego, o nil en caso de error
+		if(intent.err == nil) {
+			player.Playing = intent.val // el juego, o nil en caso de error
+		}		
 	})
 }
 
-func (player *Player) Show() chan string {
+func (player *Player) ShowWith(extra string) chan string {
 	resp := NewRetWithError[SStr]()
 	return ErrToJson( PlayerAsync[SStr]( player, resp, func(loop *Loop) {
 		stream := make(chan string)
@@ -131,6 +134,9 @@ func (player *Player) Show() chan string {
 				stream <- string(name)
 			} else {
 				stream <- "null"
+			}
+			if(extra != "") {
+				stream <- `,` + extra
 			}
 			stream <- "}"
 			close(stream)	
@@ -177,4 +183,17 @@ func (player *Player) selectPiece(gameId GameId,pieceId PieceId) RetWithError[*M
 		fmt.Printf("** DEBUG5: Selected=%v\n",player.Selected)
 		resp <- intent
 	}) // async
+}
+
+func (player *Player) End(wg *sync.WaitGroup) {
+	if(player == nil) {
+		go func() { wg.Done() } ()
+	} else {
+		player.Loop.Async(func(loop *Loop) {
+			if(player.Playing != nil) {
+				player.Playing = nil
+			}
+			wg.Done();
+		})
+	}
 }
