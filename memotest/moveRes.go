@@ -22,13 +22,17 @@ var MoveResultTexts = map[MoveResultStatus]string {
 	Blocked       : "Blocked",         // La pieza está bloqueada
 }
 
+func NewMoveResult(initialState MoveResultStatus) *MoveResult {
+	return &MoveResult{initialState, make([]*Piece,0,2)}
+}
+
 func (status MoveResultStatus) str() string { return MoveResultTexts[status]; }
 
 func (res MoveResult) Show() chan string {
 	stream := make(chan string)
 	go func() {
 		stream <- `{"state":"` + res.Status.str() + `"`
-		stream <- `"pieces":[`
+		stream <- `,"pieces":[`
 		for i, piece := range res.Pieces {
 			if(i>0) {
 				stream <- ","

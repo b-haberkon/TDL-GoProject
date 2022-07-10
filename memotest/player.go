@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 )
 
 type PlayerId struct { val int }
@@ -97,7 +98,12 @@ func (player *Player) NewGame(games *Games, config GameConfig, extra any) RetWit
 func (player *Player) JoinGame(game *Game) RetWithError[*Game] {
 	resp := NewRetWithError[*Game]()
 	return PlayerAsync( player, resp, func(loop *Loop) {
-		// Si está en un juego, no puede unirse a uno
+		// Si ya está en el mismo juego, devuelve el mismo juego
+		if (player.Playing == game) {
+			resp.SendNewAndClose(game, nil)
+			return
+		}
+		// Si está en otro juego, no puede unirse a uno
 		if (player.Playing != nil) {
 			previous := <- player.Playing.GetId()
 			txt := fmt.Sprintf(`Already playing %v`, previous.val.str() )
@@ -106,11 +112,13 @@ func (player *Player) JoinGame(game *Game) RetWithError[*Game] {
 		}
 		intent := <- game.Join(player)
 		resp <- intent
-		player.Playing = intent.val // el juego, o nil en caso de error
+		if(intent.err == nil) {
+			player.Playing = intent.val // el juego, o nil en caso de error
+		}		
 	})
 }
 
-func (player *Player) Show() chan string {
+func (player *Player) ShowWith(extra string) chan string {
 	resp := NewRetWithError[SStr]()
 	return ErrToJson( PlayerAsync[SStr]( player, resp, func(loop *Loop) {
 		stream := make(chan string)
@@ -126,6 +134,9 @@ func (player *Player) Show() chan string {
 				stream <- string(name)
 			} else {
 				stream <- "null"
+			}
+			if(extra != "") {
+				stream <- `,` + extra
 			}
 			stream <- "}"
 			close(stream)	
@@ -156,22 +167,33 @@ func (player *Player) selectPiece(gameId GameId,pieceId PieceId) RetWithError[*M
 		 * además, mientras espera una respuesta podría devolver el error de "seleccionando".
 		 **/
 		piece := pieceIntent.val;
-		if(player.Selected == nil) {							// Es la primera que selecciono
-			selIntent := <- piece.Select(player, player.Id)		// Intento seleccionarla (mientras, el jugador queda bloqueado)
-			if(selIntent.err != nil) {
-				resp.SendNewAndClose(nil,selIntent.err)
-				return
+		//var intent WithError[*MoveResult]
+		intent := <- piece.SelectOrPair(player, player.Id, player.Selected)
+		if(intent.err == nil) {
+			switch( intent.val.Status ) {
+			case Match:
+				player.Owned = append(player.Owned, piece, player.Selected)
+				player.Selected = nil
+			case Unmatch:
+				player.Selected = nil
+			default:
+				player.Selected = intent.val.Pieces[0]
+			} // switch
+		} // if (! intent.err )
+		fmt.Printf("** DEBUG5: Selected=%v\n",player.Selected)
+		resp <- intent
+	}) // async
+}
+
+func (player *Player) End(wg *sync.WaitGroup) {
+	if(player == nil) {
+		go func() { wg.Done() } ()
+	} else {
+		player.Loop.Async(func(loop *Loop) {
+			if(player.Playing != nil) {
+				player.Playing = nil
 			}
-			player.Selected = piece;
-		} else {
-			pairIntent := <- piece.Pair(player, player.Id, player.Selected)
-			if(pairIntent.err != nil) {
-				resp.SendNewAndClose(nil,pairIntent.err)
-				return
-			}
-			player.Owned = append(player.Owned, piece)
-			player.Owned = append(player.Owned, player.Selected)
-			player.Selected = nil
-		}
-	})
+			wg.Done();
+		})
+	}
 }

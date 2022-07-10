@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync"
 )
 
 type GameId struct { val int }
@@ -36,13 +37,15 @@ type GameConfig struct {
 }
 
 type Game struct {
-	Loop	*Loop
-	Id		GameId
-	Config	GameConfig
-	Extra	any
-	Players	[]*Player
-	Pieces  map[PieceId]*Piece
-	Status  GameStatus
+	Loop	      *Loop
+	Id		      GameId
+	Config	      GameConfig
+	Extra	      any
+	Players	      []*Player
+	Pieces        map[PieceId]*Piece
+	Points 	      map[*Player]int
+	Status        GameStatus
+	inGamePieces  int
 }
 
 func NewGame(id GameId, config GameConfig, extra any) *Game {
@@ -53,6 +56,7 @@ func NewGame(id GameId, config GameConfig, extra any) *Game {
 		Extra	:	extra,
 		Players	:	make([]*Player, 0, 2),
 		Pieces	:	make(map[PieceId]*Piece),
+		Points  :   make(map[*Player]int),
 		Status  :   Waiting }
 	game.Loop	=	NewLoop(&game)
 	// Usa WaitTurn para no salir de NewGame hasta que
@@ -73,15 +77,16 @@ func NewGame(id GameId, config GameConfig, extra any) *Game {
 			centralRow = game.Config.Rows/2;
 			centralCol = game.Config.Cols/2;
 			}
+		game.inGamePieces = nPieces
 		dest := shuffleSymbols(game.Config.Syms, nPieces)
 		var row, col uint8
 		i := PieceId{0}
 		for row=0; row<game.Config.Rows; row++ {
 			for col=0; col<game.Config.Cols; col++ {
-				if (centralRow != row) && (centralCol != col) {
+				if (centralRow != row) || (centralCol != col) {
 					pos := int(i.val) % len(dest)
 					i.inc()
-					game.Pieces[i] = NewPiece(i, row, col, dest[pos])
+					game.Pieces[i] = NewPiece(i, row, col, dest[pos], &game)
 				} // if(!central)
 			} // for col
 		} // for row
@@ -124,12 +129,20 @@ func (game *Game) IsValid() chan bool {
 func (game *Game) Join(player *Player) RetWithError[*Game] {
 	resp := NewRetWithError[*Game]()
 	GameAsync(game, resp, func(loop *Loop) {
-		if(player == nil) {
-			resp.SendNewAndClose(nil, errors.New("Invalid player") )
+		if(player == nil || game.Status == Dead) {
+			resp.SendNewAndClose(nil, errors.New("Invalid player or game") )
 			return
 		}
 		/** \todo game.IsValid() player.IsValdi() **/
 		/** \todo game not end **/
+
+		if(game.Status == Ended) {
+			// Si ya terminó, lo devuelve para que pueda verlo
+			// pero no lo suma
+			resp.SendNewAndClose(game, errors.New("Game ended"))
+			return
+		}
+		game.Points[player] = 0
 		var amount uint8 = uint8( len(game.Players) )
 		if(amount >= game.Config.PMax) {
 			txt := fmt.Sprintf("Game is full, there are %v, max: %v",
@@ -172,7 +185,7 @@ func (cfg *GameConfig) Show() chan string {
 }
 
 
-func (game *Game) Show() chan string {
+func (game *Game) Show(player *Player, playerId PlayerId) chan string {
 	stream := make(chan string)
 	if(game == nil) {
 		go func() {
@@ -184,18 +197,24 @@ func (game *Game) Show() chan string {
 			status := game.Status
 			players := make([]*Player, len(game.Players)) // Extranañamente, debe haber n elementos para que copy funcione
 			copy(players, game.Players)
+			points := make(map[*Player]int)
+			for player,point := range game.Points {
+				points[player] = point
+			}
 
 			// Para el resto no necesita bloquear game
 			go func() {
 
 				stream <- `{"status":"` + status.str() + `"`
 				stream <- `,"gameId":` + game.Id.str()
+				stream <- `,"playerId":` + playerId.str()
 				stream <- `,"players":[`
 				for i, player := range players {
 					if(i>0) {
 						stream <- ","
 					}
-					for chunk := range player.Show() {
+					pointsJson := `"Points":` + strconv.Itoa(points[player])
+					for chunk := range player.ShowWith(pointsJson) {
 						stream <- chunk
 					}
 				}
@@ -242,6 +261,40 @@ func (game *Game) getPiece(pieceId PieceId) RetWithError[*Piece] {
 			ret.err = errors.New("The piece does not exists")
 		}
 		resp.SendAndClose(ret);
+	})
+	return resp
+}
+
+func (game *Game) PieceRemoved(piece *Piece, player *Player, points int) {
+	game.Loop.Async(func(loop *Loop) {
+		game.inGamePieces --
+		game.Points[player] += points
+		if(game.inGamePieces < 1) {
+			// No me intersa la respuesta, pero debo leer o se bloquea game.end()
+			// Debo leerla asincrónicamente, o nunca entraré en game.end
+			// al no poder salir de acá hasta leer.
+			go func() { <- game.end() } ()
+		}
+	})
+}
+
+func (game *Game) end() RetWithError[bool] {
+	resp := NewRetWithError[bool]()
+	GameAsync(game, resp, func(loop *Loop) {
+		var wg sync.WaitGroup
+		// Pasar a End a todos los jugadores primero, para que no envíen nada a las piezas.
+		for _, player := range game.Players {
+			wg.Add(1)
+			player.End(&wg)	// No me importa esperar, y la función no devuelve nada.
+		}
+		wg.Wait() // Espero a que todos hayan terminado para matar definitivamente a las piezas.
+		//game.Players = []*Player{}
+		for _, piece := range game.Pieces {
+			piece.Die()	// No me importa esperar, y la función no devuelve nada.
+		}
+		game.Pieces = make(map[PieceId]*Piece)
+		game.Status = Ended
+		resp.SendNewAndClose(true,nil)
 	})
 	return resp
 }

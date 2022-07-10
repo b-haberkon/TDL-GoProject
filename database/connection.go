@@ -1,7 +1,7 @@
 package database
 
 import (
-	"fmt"
+	//"fmt"
 	"bufio"
 	"os"
 	"system/models"
@@ -10,6 +10,7 @@ import (
 	"github.com/glebarez/sqlite"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
+	"strings"
 )
 
 var DB *gorm.DB
@@ -27,7 +28,7 @@ func conn_to_sqlite() (db *gorm.DB, err error) {
 
 func Connect() {
 	connection, err := conn_to_sqlite()
-	defer database.DBConn.Close()
+	//defer database.DBConn.Close()
 
 	if err != nil {
 		panic("could not connection to database")
@@ -40,7 +41,7 @@ func Connect() {
 }
 
 func CargarDatos() {
-	archivo, error := os.Open("./../memotest_data.txt")
+	archivo, error := os.Open("./database/memotest_data.txt")
 	defer archivo.Close()
 	if error != nil {
 		panic("error opening file")
@@ -48,11 +49,11 @@ func CargarDatos() {
 
 	scanner := bufio.NewScanner(archivo)
 
-	for scanner.Scan(){
+	for scanner.Scan() {
 		linea := scanner.Text()
 		info := strings.Split(linea, ",")
 
-		var data Data 
+		var data models.Data 
 		data.Name = info[0]
 		data.Imagen = info[1]
 		data.Japones = info[2]
