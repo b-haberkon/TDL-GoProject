@@ -20,6 +20,10 @@
     flex: 5em;
     flex-grow:1;
     margin: 0.5em;
+    height:5em;
+    width: 5em;
+    align-items: center;
+    justify-content: center;
 }
 .pieceSelected {
     border: dashed red;
@@ -39,6 +43,17 @@
 .pieceUnmatched {
     border: dotted red;
     box-shadow: 8px #fff;
+}
+.pieceText {
+
+}
+.pieceImg {
+    /*max-width: 10em;
+    object-fit: scale-down;*/
+    height:0;
+    min-height:100%;
+    max-width:100%;
+    display:block;
 }
     </style>
     <script>
@@ -179,15 +194,22 @@ class MemoPieceAbstractState {
         this.selBy = selBy;
     }
     async draw(el) {
-        const tx = document.createElement('div');
-        tx.className = 'pieceText';
-        tx.innerText = await this.piece.getText();
+        const text = await this.piece.getText();
+        const isImg = text && (text[0]=='/');
+        const inner = document.createElement( isImg? 'img' : 'div' );
+        inner.className = isImg?'pieceImg':'pieceText';
+        if(isImg) {
+            inner.src = text;
+        } else {
+            inner.innerText = text;
+        }
+        
         el.innerHTML = '';
         el.className = 'piece piece'+this.name;
         if (this.selBy && (this.selBy != this.game.playerId)) {
             el.className+=' other'
         }
-        el.append(tx);
+        el.append(inner);
         return el;
     }
     async click(ev) {
@@ -261,7 +283,7 @@ const MemoPieceDirectProps = ['Text','Id','Row','Col'];
 
 class MemoPiece extends HtmlWrap {
     constructor(game, data) {
-        const elId = 'piece'+data.Id;
+        const elId = 'piece'+ (data?.Id??"null");
         super(elId,{});
         this.game = game;
         this.setData(data);
@@ -285,6 +307,7 @@ class MemoPiece extends HtmlWrap {
         return await this.state.draw(this.el);
     }
     async setData(data) {
+        data = Object.assign({State:"Removed",SelBy:0},data);
         if(this.state) {
             if(!this.state.changeTo(data.State,data.SelBy))
                 return false;

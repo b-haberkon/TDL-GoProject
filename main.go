@@ -11,7 +11,14 @@ import (
 
 func main() {
 	database.Connect()
-	memotest.CtrlStart()
+	allPieces, err := database.GetFullSymbolSet()
+	if(err != nil) {
+		panic("Getting symbols: "+err.Error())
+	}
+	if(len(allPieces)==0) {
+		panic("No pieces loaded.")
+	}
+	memotest.CtrlStart(allPieces)
 	app := fiber.New()
 
 	app.Use(cors.New(cors.Config{

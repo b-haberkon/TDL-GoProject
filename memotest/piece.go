@@ -55,13 +55,20 @@ type Piece struct {
 	cancel  chan bool
 }
 
-var emptySymbol Symbol = Symbol{"", -1}
+var emptySymbol Symbol = Symbol{"", 0}
 
 func NewPiece(id PieceId, row uint8, col uint8, symbol *Symbol, game *Game) *Piece {
 	if(symbol == nil) {
 		symbol = &emptySymbol;
 	}
     piece       :=  &Piece{nil, id, row, col, *symbol, game, Hidden, PlayerId{0}, nil}
+    piece.Loop  =   NewLoop(piece)
+    return          piece
+}
+
+
+func NewEmptyPiece(id PieceId, row uint8, col uint8) *Piece {
+    piece       :=  &Piece{nil, id, row, col, Symbol{"",0}, nil, Removed, PlayerId{0}, nil}
     piece.Loop  =   NewLoop(piece)
     return          piece
 }
@@ -146,7 +153,10 @@ func (piece *Piece) isMatch(symbol Symbol, player *Player, playerId PlayerId) Mo
 			piece.toState(Unmatched, player, playerId)
 		}
 	})
-	return <- resp
+	return <- RespOrTimeout(resp, 1*time.Second, func() MoveResultStatus {
+		fmt.Printf("piece %v isMatch player %v timeout",piece.Id.str(),playerId.str())
+		return Selection // Unavailable
+	}, nil)
 }
 
 /** Ejecutada dentro del bucle. **/

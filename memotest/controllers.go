@@ -18,6 +18,8 @@ var playersList	*	Players
 var gamesList	*	Games
 var rng 		*	rand.Rand
 
+var fullSet = [][]*Symbol {}
+/*
 var ej1 []*Symbol = []*Symbol {
     {Text: "A", Pair: 0}, {Text: "a", Pair: 0},
     {Text: "B", Pair: 1}, {Text: "b", Pair: 1},
@@ -29,6 +31,7 @@ var ej1 []*Symbol = []*Symbol {
     {Text: "H", Pair: 7}, {Text: "h", Pair: 7},
     {Text: "I", Pair: 8}, {Text: "i", Pair: 8},
     {Text: "J", Pair: 9}, {Text: "j", Pair: 9} }
+*/
 
 /******************************************************************************
 **** FUNCIONES AUXILIARES PARA LOS CONTROLADORES ******************************
@@ -248,11 +251,12 @@ func getGameAndId(c *fiber.Ctx) (resp RetWithError[GameWithId]) {
 ******************************************************************************/
 
 /** Inicializa lo necesario para el minijuego Memotest. **/
-func CtrlStart() {
+func CtrlStart(pairs [][]*Symbol) {
 	rng			= 	rand.New(rand.NewSource(time.Now().UnixNano()))
     store		=	session.New()
 	gamesList 	=	NewGames(nil)
 	playersList	=	NewPlayers(gamesList,nil)
+	fullSet	    =   pairs
 }
 
 /** @brief Intenta crear un juego. **/
@@ -285,7 +289,7 @@ func CreateGame(c *fiber.Ctx) error {
 		config := GameConfig{
 			Rows : uint8(rows),
 			Cols : uint8(cols),
-			Syms : ej1,
+			Syms : fullSet,
 			PMin : uint8(1+rng.Intn(1)),	// 1 o 2 (simple )
 			PMax : uint8(2+rng.Intn(4)) }	// 2 a 6
 	

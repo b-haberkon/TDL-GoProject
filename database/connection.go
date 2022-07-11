@@ -4,6 +4,7 @@ import (
 	//"fmt"
 	"bufio"
 	"os"
+	"system/memotest"
 	"system/models"
 	//"gorm.io/driver/mysql"
 	//"gorm.io/driver/sqlite"
@@ -11,6 +12,7 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 	"strings"
+	"sync"
 )
 
 var DB *gorm.DB
@@ -36,11 +38,39 @@ func Connect() {
 
 	DB = connection
 	connection.AutoMigrate(&models.User{}, &models.Data{})
-
-	CargarDatos()
 }
 
-func CargarDatos() {
+var dataLoaded = new(sync.Once)
+func GetFullSymbolSet() ([][]*memotest.Symbol, error) {
+	ret, err := getFullSymbolSet()
+	if (err!=nil) {
+		return ret, err
+	}
+	if( len(ret) > 0) {
+		return ret, err
+	}
+	// Si al primer intento no hay nada, intentará llenar
+	// la base de datos por única vez
+	dataLoaded.Do(LoadData)
+	return getFullSymbolSet()
+}
+func getFullSymbolSet() ([][]*memotest.Symbol, error) {
+	var pairs []models.Data
+	var fullSet [][]*memotest.Symbol
+	result := DB.Find(&pairs)
+	if(result.Error != nil) {
+		
+		return nil, result.Error
+	}
+	for _, pair := range pairs {
+		imagen  := memotest.Symbol{Text: pair.Imagen,  Pair: pair.Id}
+		japones := memotest.Symbol{Text: pair.Japones, Pair: pair.Id}
+		pair := []*memotest.Symbol { & imagen, & japones }
+		fullSet = append(fullSet, pair)
+	}
+	return fullSet, nil
+}
+func LoadData() {
 	archivo, error := os.Open("./database/memotest_data.txt")
 	defer archivo.Close()
 	if error != nil {

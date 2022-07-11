@@ -31,7 +31,7 @@ func (st GameStatus) str() string { return gameStatusToText[st] }
 type GameConfig struct {
 	Rows uint8
 	Cols uint8
-	Syms []*Symbol
+	Syms [][]*Symbol
 	PMin uint8
 	PMax uint8
 }
@@ -78,16 +78,22 @@ func NewGame(id GameId, config GameConfig, extra any) *Game {
 			centralCol = game.Config.Cols/2;
 			}
 		game.inGamePieces = nPieces
-		dest := shuffleSymbols(game.Config.Syms, nPieces)
+		symbols := selectSymbols(game.Config.Syms, nPieces)
 		var row, col uint8
-		i := PieceId{0}
+		pieceId := PieceId{0}
+		pos := 0
 		for row=0; row<game.Config.Rows; row++ {
 			for col=0; col<game.Config.Cols; col++ {
-				if (centralRow != row) || (centralCol != col) {
-					pos := int(i.val) % len(dest)
-					i.inc()
-					game.Pieces[i] = NewPiece(i, row, col, dest[pos], &game)
-				} // if(!central)
+				pieceId.inc()
+				isCentral := (centralRow == row) && (centralCol == col);
+				var piece *Piece
+				if(isCentral) {
+					piece = NewEmptyPiece(pieceId, row, col)
+				} else {
+					piece = NewPiece(pieceId, row, col, symbols[pos], &game)
+					pos++
+				}
+				game.Pieces[pieceId] = piece
 			} // for col
 		} // for row
 	})

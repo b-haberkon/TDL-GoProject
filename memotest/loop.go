@@ -1,6 +1,9 @@
 package memotest
 
-//import "fmt"
+import (
+	//"fmt"
+	"time"
+)
 
 type LoopFn func(*Loop)
 
@@ -66,4 +69,34 @@ func AsyncVal[T any](val T) chan T {
 		close(resp)
 	} ()
 	return resp
+}
+
+func RespOrTimeout[T any](resp chan T, expiration time.Duration, cbk func() T, discard func(T,bool)) chan T {
+	to, _, _ := timeout(expiration)
+	ret := make(chan T)
+	go func() {
+		done := false
+		for {
+			select {
+			case val, ok := <- resp:
+				if(done) {
+					if (discard != nil) {
+						discard(val,ok)
+					}
+					return
+				} else {
+					done = true
+					ret <- val
+				}
+			case <- to:
+				if(!done) {
+					done = true
+					ret <- cbk()
+				} else  {
+					return
+				}
+			} // select
+		} // for
+	} ()
+	return ret
 }
