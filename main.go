@@ -2,8 +2,8 @@ package main
 
 import (
 	"system/database"
-	"system/routes"
 	"system/memotest"
+	"system/routes"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -12,10 +12,10 @@ import (
 func main() {
 	database.Connect()
 	allPieces, err := database.GetFullSymbolSet()
-	if(err != nil) {
-		panic("Getting symbols: "+err.Error())
+	if err != nil {
+		panic("Getting symbols: " + err.Error())
 	}
-	if(len(allPieces)==0) {
+	if len(allPieces) == 0 {
 		panic("No pieces loaded.")
 	}
 	memotest.CtrlStart(allPieces)
