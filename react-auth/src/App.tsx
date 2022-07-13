@@ -1,13 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import logo from './logo.svg';
+//import logo from './logo.svg';
 import './App.css';
 import Login from './pages/Login'
-import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom';
+import { BrowserRouter, /*Navigate,*/ Route, Routes } from 'react-router-dom';
 import Home from './pages/Home'
 import Register from './pages/Register'
 import Error from './pages/Error'
 import Footer from './components/footer';
-import Navbar from './components/Navbar';
+//import Navbar from './components/Navbar';
 import Nav from './components/Navbar';
 
 
@@ -25,7 +25,7 @@ function App() {
 
         const content = await response.json();
 
-        if (content.message != "unauthenticated") {
+        if (content.message !== "unauthenticated") {
           console.log(content)
           setName(content.name);
         }
@@ -41,11 +41,11 @@ function App() {
           <div className="content-wrap">
             <main className="form-signin w-100 m-auto">
               <Routes>
-                <Route path="/*" element={< Error />} />
                 <Route path="/home" element={< Home name={name} />} />
                 <Route path="/login" element={< Login setName={setName} />} />
                 <Route path="/register" element={< Register />} />
                 <Route path="/error" element={< Error />} />
+                <Route path="/*" element={< Error />} />
               </Routes>
             </main>
           </div>

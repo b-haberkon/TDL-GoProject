@@ -1,15 +1,15 @@
-import React, { useState } from 'react';
+import /*React,*/ { useState } from 'react';
 import { Link } from "react-router-dom";
 import {
   Navbar,
   NavLink,
   Bars,
   NavMenu,
-  NavBtn,
+  //NavBtn,
   NavBtnLink,
   NavLogo
 } from './NavbarElements';
-import * as FaIcons from 'react-icons/fa';
+//import * as FaIcons from 'react-icons/fa';
 import * as AiIcons from 'react-icons/ai';
 import { SidebarData } from './SidebarData';
 import '../css/Navbar.css';
@@ -79,6 +79,9 @@ const Nav = (props: { name: string, setName: (name: string) => void }) => {
             <Bars to='#' onClick={showSidebar} className='menu-bars' />
             <NavLogo src={require('../Images/logo.png')} alt='logo' id='nav-logo' />
             <NavMenu>
+            <a href='/ejmemo.html' >
+                Play
+              </a>
               <NavLink to='/about' >
                 About
               </NavLink>
