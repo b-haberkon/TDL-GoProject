@@ -1,0 +1,20 @@
+@startuml st_PieceInternalState
+hide empty description
+'title PieceState
+
+[*]      -d-> Hidden   : NewPiece
+Hidden   -d-> Selected : Select
+Selected -u-> Hidden   : Deselect
+Selected -u-> Hidden   : Timeout
+
+Hidden   --> Match    : Pair_OK
+Selected --> Match    : Matched
+
+Hidden   --> Unmatch  : Pair_No
+Selected --> Unmatch  : Unmatched
+
+Match    -r-> Removed  : Timeout
+
+Unmatch  -u-> Hidden   : Timeout
+
+@enduml

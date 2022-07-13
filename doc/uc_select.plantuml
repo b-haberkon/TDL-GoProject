@@ -1,0 +1,162 @@
+@startuml uc_select_ok
+hide footbox
+
+actor Alice
+participant fiber1
+participant player1
+participant playersList
+participant game713
+participant piece8
+
+activate playersList #gray
+activate player1 #gray
+activate game713 #gray
+activate piece8 #gray
+
+Alice -> fiber1 : PUT memo/713/8
+activate fiber1 #blue
+fiber1 -> playersList : GetById(8)
+deactivate fiber1
+activate playersList #blue
+
+playersList -> fiber1 : player1
+deactivate playersList
+activate fiber1 #blue
+
+fiber1 -> player1 : selectPiece(713,1)
+deactivate fiber1
+activate player1 #blue
+
+player1 -> player1 : checkGameId()
+
+player1 -> game713 : getPiece(8)
+deactivate player1
+activate game713 #blue
+
+game713 -> player1 : piece8
+deactivate game713
+activate player1 #blue
+
+player1 -> piece8 : select(player1,1)
+activate piece8 #blue
+deactivate player1
+
+piece8 -> piece8 : checkStatus()
+
+piece8 -> player1 : intent=OK
+activate player1 #blue
+
+player1 -> fiber1 : intent=OK
+activate fiber1 #blue
+
+fiber1 -> Alice : intent=OK
+deactivate fiber1
+
+player1 -> player1 : selected=piece8
+deactivate player1
+
+piece8 -> piece8 : updateStatus()
+deactivate piece8
+@enduml
+
+@startuml uc_select_collide
+hide footbox
+
+actor Alice
+participant fiber1
+participant player1
+participant playersList
+participant game713
+participant piece8
+participant player2
+participant fiber2
+actor Bob
+
+activate playersList #gray
+activate player1 #gray
+activate game713 #gray
+activate piece8 #gray
+activate player2 #gray
+
+Alice -> fiber1 : PUT memo/713/8
+activate fiber1 #blue
+fiber1 -> playersList : GetById(1)
+deactivate fiber1
+activate playersList #blue
+
+Bob -> fiber2 : PUT memo/713/8
+activate fiber2 #red
+fiber2 -> playersList : GetById(2)
+deactivate fiber2
+playersList -> fiber1 : player1
+deactivate playersList
+activate fiber1 #blue
+
+playersList -> playersList : <-
+activate playersList #red
+playersList -> fiber2 : player2
+deactivate playersList
+activate fiber2 #red
+
+fiber1 -> player1 : selectPiece(713,1)
+deactivate fiber1
+activate player1 #blue
+
+fiber2 -> player2 : selectPiece(713,1)
+deactivate fiber2
+activate player2 #red
+
+player1 -> player1 : checkGameId()
+player2 -> player2 : checkGameId()
+
+player1 -> game713 : getPiece(8)
+deactivate player1
+activate game713 #blue
+
+player2 -> game713 : getPiece(8)
+deactivate player2
+
+game713 -> player1 : piece8
+deactivate game713
+activate player1 #blue
+
+game713 -> game713 : <-
+activate game713 #red
+game713 -> player2 : piece8
+deactivate game713
+activate player2 #red
+
+player1 -> piece8 : select(player1,1)
+activate piece8 #blue
+deactivate player1
+player2 -> piece8 : select(player2,2)
+deactivate player2
+piece8 -> piece8 : checkStatus()
+piece8 -> player1 : intent=OK
+activate player1 #blue
+player1 -> fiber1 : intent=OK
+activate fiber1 #blue
+fiber1 -> Alice : intent=OK
+deactivate fiber1
+
+player1 -> player1 : selected=piece8
+deactivate player1
+piece8 -> piece8 : updateStatus()
+deactivate piece8
+
+piece8 -> piece8 : <-
+
+activate piece8 #red
+piece8 -> piece8 : checkStatus()
+piece8 -> player2 : intent=BLOCKED
+activate player2 #red
+deactivate piece8
+player2 -> fiber2 : intent=BLOCKED
+deactivate player2
+activate fiber2 #red
+fiber2 -> Bob : intent=BLOCKED
+deactivate fiber2
+
+
+
+@enduml

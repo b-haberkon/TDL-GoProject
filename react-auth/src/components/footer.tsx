@@ -1,7 +1,7 @@
 import React from 'react';
-import { Link } from "react-router-dom";
+//import { Link } from "react-router-dom";
 import "./footer.css";
-import { FaFacebookF, FaHeart, FaSlack, FaTelegram, FaTelegramPlane, FaTwitter } from "react-icons/fa";
+import { FaFacebookF, /*FaHeart,*/ FaSlack, /*FaTelegram,*/ FaTelegramPlane, FaTwitter } from "react-icons/fa";
 
 const Footer = () => {
     return (
