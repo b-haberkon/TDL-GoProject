@@ -11,6 +11,8 @@ Para iniciar el servidor, ejecutar `go run main.go` desde la raíz del proyecto.
 El mismo correrá por defecto en el puerto 8000, luego de mostrar un pequeño recuadro con información.
 Se vuelca también por consola varios informes para mostrar el funcionamiento.
 
+Hay un [**Swagger/OpenAPI**](/doc/swagger.json) disponible.
+
 ### Iniciar el cliente
 La primera vez es necesario instalar las dependencias, mediante el comando `npm i`.
 Luego puede iniciarse con el comando `npm start`, que abrirá el puerto 3000.
@@ -28,6 +30,7 @@ Las dos principales diferencias con el tradicional son que:
 a. Es multijugador.
 
 b. Los pares no son de piezas idénticas, sino de significados idénticos. Están compuestos por una palabra en japonés y un dibujo que la representa.
+Pero, en ambos casos, desde el subdirectorio `react-auth/`.
 
 ### Cómo jugarlo
 La interfaz es muy sencilla y minimalista ya que el foco del desarrollo está en el backend con concurrencia.
